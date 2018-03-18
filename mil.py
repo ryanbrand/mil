@@ -414,8 +414,9 @@ class MIL(object):
             lossesb = [[] for _ in xrange(num_updates)]
             outputsb = [[] for _ in xrange(num_updates)]
 
-            def batch_metalearn(inp):
-                inputa, inputb, actiona, actionb = inp
+            def batch_metalearn(inp): 
+                inputa, inputb, actiona, actionb = inp # input has two examples: action/obs a is for training on task, 
+                # action/obs b is for meta-training update
                 inputa = tf.reshape(inputa, [-1, dim_input])
                 inputb = tf.reshape(inputb, [-1, dim_input])
                 actiona = tf.reshape(actiona, [-1, dim_output])
@@ -454,7 +455,10 @@ class MIL(object):
                 if FLAGS.learn_final_eept:
                     final_eeptas = [final_eepta]*num_updates
 
-                # Pre-update
+
+                # euclidean loss layer = (action - mlp_out)'*precision*(action-mlp_out) = (u-uhat)'*A*(u-uhat)
+
+                # Pre-update # aka update on task, single step of GD
                 if 'Training' in prefix:
                     local_outputa, final_eept_preda = self.forward(inputa, state_inputa, weights, network_config=network_config)
                 else:
@@ -467,7 +471,7 @@ class MIL(object):
                 if FLAGS.learn_final_eept:
                     local_lossa += final_eept_loss_eps * final_eept_lossa
 
-                # Compute fast gradients
+                # Compute fast gradients - take GD step
                 grads = tf.gradients(local_lossa, weights.values())
                 gradients = dict(zip(weights.keys(), grads))
                 # make fast gradient zero for weights with gradient None
@@ -485,9 +489,10 @@ class MIL(object):
                     gradients['wc1'] = tf.zeros_like(gradients['wc1'])
                     gradients['bc1'] = tf.zeros_like(gradients['bc1'])
                 gradients_summ.append([gradients[key] for key in self.sorted_weight_keys])
+                # weird way to take GD step--but this is the update; w = w - lr*gradient; update weights for current task
                 fast_weights = dict(zip(weights.keys(), [weights[key] - self.step_size*gradients[key] for key in weights.keys()]))
 
-                # Post-update
+                # Post-update - aka meta update on demonstration b (note meta_testing=True)
                 if FLAGS.no_state:
                     state_inputb = None
                 if 'Training' in prefix:
@@ -495,7 +500,7 @@ class MIL(object):
                 else:
                     outputb, final_eept_predb = self.forward(inputb, state_inputb, fast_weights, meta_testing=True, is_training=False, testing=testing, network_config=network_config)
                 local_outputbs.append(outputb)
-                if FLAGS.learn_final_eept:
+                if FLAGS.learn_final_eept: 
                     final_eept_lossb = euclidean_loss_layer(final_eept_predb, final_eeptb, multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
                 else:
                     final_eept_lossb = tf.constant(0.0)
@@ -508,7 +513,7 @@ class MIL(object):
                 final_eept_lossesb.append(final_eept_lossb)
                 local_lossesb.append(local_lossb)
 
-                for j in range(num_updates - 1):
+                for j in range(num_updates - 1): # more input-observation pairs
                     # Pre-update
                     state_inputa_new = state_inputas[j+1]
                     if FLAGS.no_state:
