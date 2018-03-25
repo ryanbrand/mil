@@ -30,7 +30,10 @@ class MIL(object):
         self._dU = dU
 
     def init_network(self, graph, input_tensors=None, restore_iter=0, prefix='Training_'):
-        """ Helper method to initialize the tf networks used """
+        """Helper method to initialize the tf networks used;
+        takes in tf graph; initializes networks; calls construct_model; sets params based 
+        on training/validation/test mode contained in prefix var
+        """
         with graph.as_default():
             with Timer('building TF network'):
                 result = self.construct_model(input_tensors=input_tensors, prefix=prefix, dim_input=self._dO, dim_output=self._dU,
@@ -75,7 +78,10 @@ class MIL(object):
                 self.val_summ_op = tf.summary.merge(summ)
 
     def construct_image_input(self, nn_input, state_idx, img_idx, network_config=None):
-        """ Preprocess images. """
+        """Preprocess images;
+        takes in state_idx (list of indices for state data in observation), img_idx (list of indices for image data in observation), 
+        and nn_input; pretty much just preprocesses input; returns preprocessed image input, flattened image input, and the state input
+        """
         state_input = nn_input[:, 0:state_idx[-1]+1]
         flat_image_input = nn_input[:, state_idx[-1]+1:img_idx[-1]+1]
 
@@ -94,7 +100,11 @@ class MIL(object):
         return image_input, flat_image_input, state_input
 
     def construct_weights(self, dim_input=27, dim_output=7, network_config=None):
-        """ Construct weights for the network. """
+        """ 
+        Construct weights for the network;
+        takes in input dim and final output dim and just builds conv and fc weights, including augmented bias thing 
+        (and 2-headed architecture if FLAGS.two_head is true); returns weights
+        """
         weights = {}
         num_filters = network_config['num_filters']
         strides = network_config.get('strides', [[1, 2, 2, 1], [1, 2, 2, 1], [1, 2, 2, 1]])
@@ -180,6 +190,9 @@ class MIL(object):
         return weights
 
     def construct_fc_weights(self, dim_input=27, dim_output=7, network_config=None):
+        """
+        same as above just for only fc weights
+        """
         n_layers = network_config.get('n_layers', 4)
         dim_hidden = network_config.get('layer_size', [100]*(n_layers-1))
         if type(dim_hidden) is not list:
@@ -215,7 +228,11 @@ class MIL(object):
         return weights
 
     def forward(self, image_input, state_input, weights, meta_testing=False, is_training=True, testing=False, network_config=None):
-        """ Perform the forward pass. """
+        """ 
+        Perform the forward pass;
+        given image input, state input, and weight dict, perform standard forward pass in net, except only through conv layers really, 
+        then call fc_forward and output final result through that 
+        """
         if FLAGS.fc_bt:
             im_height = network_config['image_height']
             im_width = network_config['image_width']
@@ -319,6 +336,9 @@ class MIL(object):
         return self.fc_forward(fc_input, weights, state_input=state_input, meta_testing=meta_testing, is_training=is_training, testing=testing, network_config=network_config), final_eept_pred
 
     def fc_forward(self, fc_input, weights, state_input=None, meta_testing=False, is_training=True, testing=False, network_config=None):
+        '''
+        fc_forward: completes forward pass for conv net; performs forward pass given special fc input (flexible for multiple architectures, including 2-headed, etc)
+        '''
         n_layers = network_config.get('n_layers', 4)
         use_dropout = FLAGS.dropout
         prob = FLAGS.keep_prob
@@ -513,7 +533,7 @@ class MIL(object):
                 final_eept_lossesb.append(final_eept_lossb)
                 local_lossesb.append(local_lossb)
 
-                for j in range(num_updates - 1): # more input-observation pairs
+                for j in range(num_updates - 1): # more input-observation pairs; num_updates = num steps of SGD to take
                     # Pre-update
                     state_inputa_new = state_inputas[j+1]
                     if FLAGS.no_state:
