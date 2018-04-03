@@ -49,7 +49,7 @@ flags.DEFINE_bool('fc_bt', True, 'use bias transformation for the first fc layer
 flags.DEFINE_bool('all_fc_bt', False, 'use bias transformation for all fc layers')
 flags.DEFINE_bool('conv_bt', True, 'use bias transformation for the first conv layer, N/A for using pretraining')
 flags.DEFINE_integer('bt_dim', 10, 'the dimension of bias transformation for FC layers')
-flags.DEFINE_string('pretrain_weight_path', 'N/A', 'path to pretrained weights')
+flags.DEFINE_string('pretrain_weight_path', 'N/A', 'path to pretrained weights') # pretrained using MIL to be fine-tuned with gradient step
 flags.DEFINE_bool('train_pretrain_conv1', False, 'whether to finetune the pretrained weights')
 flags.DEFINE_bool('two_head', False, 'use two-head architecture')
 flags.DEFINE_bool('learn_final_eept', False, 'learn an auxiliary loss for predicting final end-effector pose')
@@ -71,7 +71,7 @@ flags.DEFINE_bool('fp', True, 'use spatial soft-argmax or not')
 flags.DEFINE_string('norm', 'layer_norm', 'batch_norm, layer_norm, or None')
 flags.DEFINE_bool('dropout', False, 'use dropout for fc layers or not')
 flags.DEFINE_float('keep_prob', 0.5, 'keep probability for dropout')
-flags.DEFINE_integer('num_filters', 64, 'number of filters for conv nets -- 64 for placing, 16 for pushing, 40 for reaching.')
+flags.DEFINE_integer('num_filters', 64, 'number of filters for conv nets -- 64 for placing, 16 for pushing, 40 for reaching.') # seems like pushing is easiest?
 flags.DEFINE_integer('filter_size', 3, 'filter size for conv nets -- 3 for placing, 5 for pushing, 3 for reaching.')
 flags.DEFINE_integer('num_conv_layers', 5, 'number of conv layers -- 5 for placing, 4 for pushing, 3 for reaching.')
 flags.DEFINE_integer('num_strides', 3, 'number of conv layers with strided filters -- 3 for placing, 4 for pushing, 3 for reaching.')
@@ -93,6 +93,7 @@ flags.DEFINE_integer('test_update_batch_size', 1, 'number of demos used during t
 flags.DEFINE_float('gpu_memory_fraction', 1.0, 'fraction of memory used in gpu')
 flags.DEFINE_bool('record_gifs', True, 'record gifs during evaluation')
 
+# TODO: how are graph and model different?
 def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
     """
     Train the model.
@@ -110,8 +111,11 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
         training_range = range(TOTAL_ITERS)
     else:
         training_range = range(restore_itr+1, TOTAL_ITERS)
+    # for each training iteration
     for itr in training_range:
+        # get state action pairs
         state, tgt_mu = data_generator.generate_data_batch(itr)
+        # we split the states and actions in half ? a,b
         statea = state[:, :FLAGS.update_batch_size*FLAGS.T, :]
         stateb = state[:, FLAGS.update_batch_size*FLAGS.T:, :]
         actiona = tgt_mu[:, :FLAGS.update_batch_size*FLAGS.T, :]
@@ -198,6 +202,7 @@ def main():
             env = gym.make('ReacherMILTest-v1')
             ob = env.reset()
             # import pdb; pdb.set_trace()
+    # setup session
     graph = tf.Graph()
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=FLAGS.gpu_memory_fraction)
     tf_config = tf.ConfigProto(gpu_options=gpu_options)
@@ -213,6 +218,7 @@ def main():
         'layer_size': FLAGS.layer_size,
         'initialization': FLAGS.init,
     }
+    # generate expert demonstrations
     data_generator = DataGenerator()
     state_idx = data_generator.state_idx
     img_idx = range(len(state_idx), len(state_idx)+FLAGS.im_height*FLAGS.im_width*FLAGS.num_channels)

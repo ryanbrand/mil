@@ -36,6 +36,7 @@ class MIL(object):
         """
         with graph.as_default():
             with Timer('building TF network'):
+                # map inputs to outputs
                 result = self.construct_model(input_tensors=input_tensors, prefix=prefix, dim_input=self._dO, dim_output=self._dU,
                                           network_config=self.network_params)
             outputas, outputbs, test_output, lossesa, lossesb, final_eept_lossesb, flat_img_inputb, gradients = result
@@ -46,7 +47,9 @@ class MIL(object):
                 self.image_op = flat_img_inputb
 
             trainable_vars = tf.trainable_variables()
+            # pre-update losses
             total_loss1 = tf.reduce_sum(lossesa) / tf.to_float(self.meta_batch_size)
+            # post-update losses
             total_losses2 = [tf.reduce_sum(lossesb[j]) / tf.to_float(self.meta_batch_size) for j in range(self.num_updates)]
             total_final_eept_losses2 = [tf.reduce_sum(final_eept_lossesb[j]) / tf.to_float(self.meta_batch_size) for j in range(self.num_updates)]
 
@@ -58,8 +61,9 @@ class MIL(object):
                 self.val_total_loss1 = total_loss1
                 self.val_total_losses2 = total_losses2
                 self.val_total_final_eept_losses2 = total_final_eept_losses2
-
+            # TODO: add reptile in here
             if 'Training' in prefix:
+                # TODO: figure out why we are using total_losses2[self.num_updates - 1]
                 self.train_op = tf.train.AdamOptimizer(self.meta_lr).minimize(self.total_losses2[self.num_updates - 1])
                 # Add summaries
                 summ = [tf.summary.scalar(prefix + 'Pre-update_loss', self.total_loss1)]
@@ -389,6 +393,7 @@ class MIL(object):
         Returns:
             a tuple of output tensors.
         """
+        # create placeholders for observations, states, and actions
         if input_tensors is None:
             self.obsa = obsa = tf.placeholder(tf.float32, name='obsa') # meta_batch_size x update_batch_size x dim_input
             self.obsb = obsb = tf.placeholder(tf.float32, name='obsb')
@@ -407,6 +412,7 @@ class MIL(object):
             actiona = self.actiona
             actionb = self.actionb
 
+        # feed states and observations in as input to model; this provides more info that just obs
         inputa = tf.concat(axis=2, values=[statea, obsa])
         inputb = tf.concat(axis=2, values=[stateb, obsb])
 
@@ -423,20 +429,24 @@ class MIL(object):
                 training_scope.reuse_variables()
                 weights = self.weights
 
+            # set hyperparameters
             self.step_size = FLAGS.train_update_lr
             loss_multiplier = FLAGS.loss_multiplier
             final_eept_loss_eps = FLAGS.final_eept_loss_eps
             act_loss_eps = FLAGS.act_loss_eps
             use_whole_traj = FLAGS.learn_final_eept_whole_traj
 
+            # record losses for fine-tune and after meta update?
             num_updates = self.num_updates
             lossesa, outputsa = [], []
             lossesb = [[] for _ in xrange(num_updates)]
             outputsb = [[] for _ in xrange(num_updates)]
 
             def batch_metalearn(inp): 
-                inputa, inputb, actiona, actionb = inp # input has two examples: action/obs a is for training on task, 
+                # input has two examples: action/obs a is for training on task, 
                 # action/obs b is for meta-training update
+                # this is because you need to train on the task to get the loss L_i to take grad w.r.t. initial params
+                inputa, inputb, actiona, actionb = inp 
                 inputa = tf.reshape(inputa, [-1, dim_input])
                 inputb = tf.reshape(inputb, [-1, dim_input])
                 actiona = tf.reshape(actiona, [-1, dim_output])
@@ -444,6 +454,7 @@ class MIL(object):
                 gradients_summ = []
                 testing = 'Testing' in prefix
 
+                # for learning end effector pose
                 final_eepta, final_eeptb = None, None
                 if FLAGS.learn_final_eept:
                     final_eept_range = range(FLAGS.final_eept_min, FLAGS.final_eept_max)
@@ -459,6 +470,7 @@ class MIL(object):
 
                 local_outputbs, local_lossesb, final_eept_lossesb = [], [], []
                 # Assume fixed data for each update
+                # by update they mean the number of gradient steps on loss L_i before taking derivative w.r.t inital params
                 actionas = [actiona]*num_updates
 
                 # Convert to image dims
@@ -492,6 +504,7 @@ class MIL(object):
                     local_lossa += final_eept_loss_eps * final_eept_lossa
 
                 # Compute fast gradients - take GD step
+                # Do normal updates on the local_lossa
                 grads = tf.gradients(local_lossa, weights.values())
                 gradients = dict(zip(weights.keys(), grads))
                 # make fast gradient zero for weights with gradient None
@@ -513,6 +526,7 @@ class MIL(object):
                 fast_weights = dict(zip(weights.keys(), [weights[key] - self.step_size*gradients[key] for key in weights.keys()]))
 
                 # Post-update - aka meta update on demonstration b (note meta_testing=True)
+                # Compute new loss after gradient update on weights w.r.t L_i
                 if FLAGS.no_state:
                     state_inputb = None
                 if 'Training' in prefix:
@@ -590,6 +604,7 @@ class MIL(object):
                         final_eept_lossb = euclidean_loss_layer(final_eept_predb[0], final_eeptb[0], multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
                     final_eept_lossesb.append(final_eept_lossb)
                     local_lossesb.append(lossb)
+                # assuming this is all of the loss / gradient information needed to make take a MIL step
                 local_fn_output = [local_outputa, local_outputbs, local_outputbs[-1], local_lossa, local_lossesb, final_eept_lossesb, flat_img_inputb, gradients_summ]
                 return local_fn_output
 
@@ -598,6 +613,7 @@ class MIL(object):
             unused = batch_metalearn((inputa[0], inputb[0], actiona[0], actionb[0]))
 
         out_dtype = [tf.float32, [tf.float32]*num_updates, tf.float32, tf.float32, [tf.float32]*num_updates, [tf.float32]*num_updates, tf.float32, [[tf.float32]*len(self.weights.keys())]*num_updates]
+        # creates a list of loss, gradient info to take MIL step
         result = tf.map_fn(batch_metalearn, elems=(inputa, inputb, actiona, actionb), dtype=out_dtype)
         print 'Done with map.'
         return result
