@@ -41,9 +41,12 @@ class MIL(object):
         self.add_placeholders(input_tensors)
         # sets self.weights
         self.add_weights(prefix=prefix, dim_input=self._dO, dim_output=self._dU, network_config=self.network_params)
-        # sets self.minimize_op
+        # sets self.minimize_op, self.loss
         self.add_loss(input_tensors=input_tensors, prefix=prefix, dim_input=self._dO, dim_output=self._dU, network_config=self.network_params)
-        # missing self.test_act_op, self.total_loss1, self.total_losses2, self.total_final_eept_losses2 (+ val), self.train_summ_op, self.val_summ_op
+        if 'Training' in prefix:
+            self.train_summ_op = tf.summary.scalar(prefix+'loss', self.loss)
+        elif 'Validation' in prefix:
+            self.val_summ_op = tf.summary.scalar(prefix+'loss', self.loss)
 
     # [checked]
     def add_placeholders(self, input_tensors=None):
@@ -415,4 +418,5 @@ class MIL(object):
         local_lossa = self.act_loss_eps * euclidean_loss_layer(local_outputa, actiona, multiplier=self.loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
         if FLAGS.learn_final_eept:
             local_lossa += self.final_eept_loss_eps * final_eept_lossa
+        self.loss = local_lossa
         self.minimize_op = tf.train.AdamOptimizer(self.step_size).minimize(local_lossa)
