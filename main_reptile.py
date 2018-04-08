@@ -97,7 +97,7 @@ flags.DEFINE_float('gpu_memory_fraction', 1.0, 'fraction of memory used in gpu')
 flags.DEFINE_bool('record_gifs', True, 'record gifs during evaluation')
 
 
-def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0, network_config):
+def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0, network_config=None):
     """
     Train the model.
     """
@@ -114,19 +114,19 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0, net
     else:
         training_range = range(restore_itr+1, TOTAL_ITERS)
 
-    # added 
-    reptile = Reptile(sess, variables=None, transductive=True, pre_step_op=None):
-    # shape T x H x W x C
-    train_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter)
-    inputa = train_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
-    inputb = train_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
-    train_input_tensors = {'inputa': inputa, 'inputb': inputb}
-    # get val image queue i.e. inputa and inputb
-    # shape T x H x W x C
-    val_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter, train=False)
-    inputa = val_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
-    inputb = val_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
-    val_input_tensors = {'inputa': inputa, 'inputb': inputb}
+    # added
+    reptile = Reptile(sess, variables=None, transductive=True, pre_step_op=None)
+    with graph.as_default():
+        # shape T x H x W x C
+        train_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter)
+        inputa = train_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
+        inputb = train_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
+        train_input_tensors = {'inputa': inputa, 'inputb': inputb}
+        # shape T x H x W x C
+        val_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter, train=False)
+        inputa = val_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
+        inputb = val_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
+        val_input_tensors = {'inputa': inputa, 'inputb': inputb}
 
     # for each training iteration
     for itr in training_range:
@@ -230,6 +230,7 @@ def generate_test_demos(data_generator):
     data_generator.selected_demo = selected_demo
 
 def main():
+    print('STARTING MAIN')
     tf.set_random_seed(FLAGS.random_seed)
     np.random.seed(FLAGS.random_seed)
     random.seed(FLAGS.random_seed)
@@ -240,10 +241,12 @@ def main():
             ob = env.reset()
             # import pdb; pdb.set_trace()
     # setup session
+    print('MAKING SESS')
     graph = tf.Graph()
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=FLAGS.gpu_memory_fraction)
     tf_config = tf.ConfigProto(gpu_options=gpu_options)
     sess = tf.Session(graph=graph, config=tf_config)
+    print('MADE SESS')
     network_config = {
         'num_filters': [FLAGS.num_filters]*FLAGS.num_conv_layers,
         'strides': [[1, 2, 2, 1]]*FLAGS.num_strides + [[1, 1, 1, 1]]*(FLAGS.num_conv_layers-FLAGS.num_strides),
@@ -291,9 +294,9 @@ def main():
 
     # put here for now
     if FLAGS.train:
+        print('FLAGS.use_noisy_demos:', FLAGS.use_noisy_demos)
         data_generator.generate_batches(noisy=FLAGS.use_noisy_demos)
         with graph.as_default():
-            '''
             # get train image queue i.e. inputa and inputb
             # shape T x H x W x C
             train_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter)
@@ -306,7 +309,7 @@ def main():
             inputa = val_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
             inputb = val_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
             val_input_tensors = {'inputa': inputa, 'inputb': inputb}
-            '''
+        print('WOOOOOOP')
         # setup network placeholders and forward pass etc
         # there is no placeholder for the queue output
         #model.init_network(graph, input_tensors=train_input_tensors, restore_iter=FLAGS.restore_iter)

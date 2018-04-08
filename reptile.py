@@ -1,6 +1,7 @@
 import random
+import tensorflow as tf
 
-from .variables import (interpolate_vars, average_vars, subtract_vars, add_vars, scale_vars, VariableState)
+from variables import (interpolate_vars, average_vars, subtract_vars, add_vars, scale_vars, VariableState)
 
 class Reptile:
     """
