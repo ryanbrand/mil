@@ -123,10 +123,11 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0, net
         inputb = train_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
         train_input_tensors = {'inputa': inputa, 'inputb': inputb}
         # shape T x H x W x C
-        val_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter, train=False)
-        inputa = val_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
-        inputb = val_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
-        val_input_tensors = {'inputa': inputa, 'inputb': inputb}
+        # TODO: fix val
+        #val_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter, train=False)
+        #inputa = val_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
+        #inputb = val_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
+        #val_input_tensors = {'inputa': inputa, 'inputb': inputb}
 
     # for each training iteration
     for itr in training_range:
@@ -138,7 +139,8 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0, net
         stateb = state[:, FLAGS.update_batch_size*FLAGS.T:, :]
         actiona = tgt_mu[:, :FLAGS.update_batch_size*FLAGS.T, :]
         actionb = tgt_mu[:, FLAGS.update_batch_size*FLAGS.T:, :]
-        inputa  = train_image_tensors['inputa']
+        inputa  = train_input_tensors['inputa']
+        print('inputa shape:', inputa.shape, 'statea shape:', statea.shape, 'actiona shape:', actiona.shape)
         dataset = (actiona, statea, inputa) 
         reptile.train_step(
             dataset,
@@ -297,6 +299,7 @@ def main():
         print('FLAGS.use_noisy_demos:', FLAGS.use_noisy_demos)
         data_generator.generate_batches(noisy=FLAGS.use_noisy_demos)
         with graph.as_default():
+            '''
             # get train image queue i.e. inputa and inputb
             # shape T x H x W x C
             train_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter)
@@ -309,7 +312,7 @@ def main():
             inputa = val_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
             inputb = val_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
             val_input_tensors = {'inputa': inputa, 'inputb': inputb}
-        print('WOOOOOOP')
+            '''
         # setup network placeholders and forward pass etc
         # there is no placeholder for the queue output
         #model.init_network(graph, input_tensors=train_input_tensors, restore_iter=FLAGS.restore_iter)

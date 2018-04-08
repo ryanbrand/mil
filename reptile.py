@@ -47,17 +47,23 @@ class Reptile:
           meta_step_size: interpolation coefficient.
           meta_batch_size: how many inner-loops to run.
         """
+        print('train step')
         old_vars = self._model_state.export_variables()
         new_vars = []
         actiona, statea, inputa = dataset 
-        for _ in range(meta_batch_size):
+        for task_idx in range(meta_batch_size):
+            print('task:', task_idx)
             action_batch = actiona[task_idx, :, :]
             state_batch  = statea[task_idx, :, :]
-            obs_batch    = inputa[task_idx, :, :, :]
+            print('getting obs batch:')
+            obs_batch    = self.session.run(inputa[task_idx, :, :])
             # was in loop
+            print('pre step op:')
             if self._pre_step_op:
+                print('running pre step')
                 self.session.run(self._pre_step_op)
             feed_dict = {state_ph : state_batch, label_ph : action_batch, obs_ph : obs_batch}
+            print('running minimize_op')
             self.session.run(minimize_op, feed_dict=feed_dict)
             # out of loop
             new_vars.append(self._model_state.export_variables())
