@@ -11,9 +11,10 @@ from sampler_utils import rollout
 from utils import mkdir_p, load_scale_and_bias
 import sys
 
-XML_PATH = 'sim_push_xmls/'
+XML_PATH = '/home/rmb2208/gym/gym/envs/mujoco/assets/sim_push_xmls/'
 SCALE_FILE_PATH = 'data/scale_and_bias_sim_push.pkl'
 CROP = False
+sys.path.append('/home/rmb2208/gym/gym')
 from gym.envs.mujoco.pusher import PusherEnv
 
 class TFAgent(object):
@@ -78,7 +79,6 @@ def load_env(demo_info):
     suffix = xml_filepath[xml_filepath.index('pusher'):]
     prefix = XML_PATH + 'test2_ensure_woodtable_distractor_'
     xml_filepath = str(prefix + suffix)
-    print(xml_filepath)
 
     env = PusherEnv(**{'xml_file':xml_filepath, 'distractors': True})
     return env
@@ -134,9 +134,9 @@ def evaluate_push(sess, graph, model, data_generator, exp_string, log_dir, demo_
 
         # load xml file
         env = load_env(demo_info)
-
         policy = TFAgent(model, scale_file, sess)
         policy.set_demo(demo_gifs, demoX, demoU)
+
         returns = []
         gif_dir = log_dir + '/evaluated_gifs/'
         mkdir_p(gif_dir)

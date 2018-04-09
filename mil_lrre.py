@@ -560,7 +560,18 @@ class MIL_LRRE(object):
                     final_eept_lossa = euclidean_loss_layer(final_eept_preda, final_eepta, multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
                 else:
                     final_eept_lossa = tf.constant(0.0)
+                
+                # memory 
+                if FLAGS.use_lrre:
+                    mem_loss, local_outputa = self.core_builder(local_outputa, actiona, keep_prob=0.3)
+
                 local_lossa = act_loss_eps * euclidean_loss_layer(local_outputa, actiona, multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
+                
+                # memory 
+                if FLAGS.use_lrre:
+                    loss += act_loss_eps * mem_loss # should try diff epsilons
+
+                # end effector position auxiliary loss 
                 if FLAGS.learn_final_eept:
                     local_lossa += final_eept_loss_eps * final_eept_lossa
 
@@ -620,12 +631,18 @@ class MIL_LRRE(object):
                         final_eept_lossa = euclidean_loss_layer(final_eept_preda, final_eeptas[j+1], multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
                     else:
                         final_eept_lossa = tf.constant(0.0)
+                    
+                    # memory 
+                    if FLAGS.use_lrre:
+                        mem_loss, local_outputa = self.core_builder(local_outputa, actiona, keep_prob=0.3)
+
                     loss = act_loss_eps * euclidean_loss_layer(outputa, actionas[j+1], multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
+                
                     # memory
                     if FLAGS.use_lrre:
-                        mem_loss, _ = self.core_builder(outputa, actionas[j+1], keep_prob=0.3)
                         loss += act_loss_eps * mem_loss # should try diff epsilons
-
+                    
+                    # end effector position auxiliary loss
                     if FLAGS.learn_final_eept:
                         loss += final_eept_loss_eps * final_eept_lossa
 

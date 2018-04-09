@@ -14,6 +14,12 @@ FLAGS = flags.FLAGS
 class MIL(object):
     """ Initialize MIL. Need to call init_network to contruct the architecture after init. """
     def __init__(self, dU, state_idx=None, img_idx=None, network_config=None):
+        # added
+        self.step_size = FLAGS.train_update_lr
+        self.loss_multiplier = FLAGS.loss_multiplier
+        self.final_eept_loss_eps = FLAGS.final_eept_loss_eps
+        self.act_loss_eps = FLAGS.act_loss_eps
+        self.use_whole_traj = FLAGS.learn_final_eept_whole_traj
         # MIL hyperparams
         self.num_updates = FLAGS.num_updates
         self.update_batch_size = FLAGS.update_batch_size
@@ -29,57 +35,28 @@ class MIL(object):
         self._dO = len(img_idx) + len(state_idx)
         self._dU = dU
 
+    # [checked]
     def init_network(self, graph, input_tensors=None, restore_iter=0, prefix='Training_'):
-        """Helper method to initialize the tf networks used;
-        takes in tf graph; initializes networks; calls construct_model; sets params based 
-        on training/validation/test mode contained in prefix var
-        """
         with graph.as_default():
-            with Timer('building TF network'):
-                # map inputs to outputs
-                result = self.construct_model(input_tensors=input_tensors, prefix=prefix, dim_input=self._dO, dim_output=self._dU,
-                                          network_config=self.network_params)
-            outputas, outputbs, test_output, lossesa, lossesb, final_eept_lossesb, flat_img_inputb, gradients = result
-            if 'Testing' in prefix:
-                self.obs_tensor = self.obsa
-                self.state_tensor = self.statea
-                self.test_act_op = test_output
-                self.image_op = flat_img_inputb
+            # sets self.state_ph, self.obs_ph, self.label_ph 
+            self.add_placeholders(input_tensors)
+            # sets self.weights
+            self.add_weights(dim_input=self._dO, dim_output=self._dU, network_config=self.network_params)
+            # sets self.minimize_op, self.loss
+            self.add_loss(input_tensors=input_tensors, prefix=prefix, dim_input=self._dO, dim_output=self._dU, network_config=self.network_params)
+        if 'Training' in prefix:
+            self.train_summ_op = tf.summary.scalar(prefix+'loss', self.loss)
+        elif 'Validation' in prefix:
+            self.val_summ_op = tf.summary.scalar(prefix+'loss', self.loss)
 
-            trainable_vars = tf.trainable_variables()
-            # pre-update losses
-            total_loss1 = tf.reduce_sum(lossesa) / tf.to_float(self.meta_batch_size)
-            # post-update losses
-            total_losses2 = [tf.reduce_sum(lossesb[j]) / tf.to_float(self.meta_batch_size) for j in range(self.num_updates)]
-            total_final_eept_losses2 = [tf.reduce_sum(final_eept_lossesb[j]) / tf.to_float(self.meta_batch_size) for j in range(self.num_updates)]
-
-            if 'Training' in prefix:
-                self.total_loss1 = total_loss1
-                self.total_losses2 = total_losses2
-                self.total_final_eept_losses2 = total_final_eept_losses2
-            elif 'Validation' in prefix:
-                self.val_total_loss1 = total_loss1
-                self.val_total_losses2 = total_losses2
-                self.val_total_final_eept_losses2 = total_final_eept_losses2
-            # TODO: add reptile in here
-            if 'Training' in prefix:
-                # TODO: figure out why we are using total_losses2[self.num_updates - 1]
-                self.train_op = tf.train.AdamOptimizer(self.meta_lr).minimize(self.total_losses2[self.num_updates - 1])
-                # Add summaries
-                summ = [tf.summary.scalar(prefix + 'Pre-update_loss', self.total_loss1)]
-                for j in xrange(self.num_updates):
-                    summ.append(tf.summary.scalar(prefix + 'Post-update_loss_step_%d' % j, self.total_losses2[j]))
-                    summ.append(tf.summary.scalar(prefix + 'Post-update_final_eept_loss_step_%d' % j, self.total_final_eept_losses2[j]))
-                    for k in xrange(len(self.sorted_weight_keys)):
-                        summ.append(tf.summary.histogram('Gradient_of_%s_step_%d' % (self.sorted_weight_keys[k], j), gradients[j][k]))
-                self.train_summ_op = tf.summary.merge(summ)
-            elif 'Validation' in prefix:
-                # Add summaries
-                summ = [tf.summary.scalar(prefix + 'Pre-update_loss', self.val_total_loss1)]
-                for j in xrange(self.num_updates):
-                    summ.append(tf.summary.scalar(prefix + 'Post-update_loss_step_%d' % j, self.val_total_losses2[j]))
-                    summ.append(tf.summary.scalar(prefix + 'Post-update_final_eept_loss_step_%d' % j, self.val_total_final_eept_losses2[j]))
-                self.val_summ_op = tf.summary.merge(summ)
+    # [checked]
+    def add_placeholders(self, input_tensors=None):
+        # TODO: change input to be tf.concat(axis=2, values=[statea, obsa]) elsewhere
+        # Note: this is both create_placeholders and add_placeholders
+        if input_tensors is None:
+            self.state_ph = tf.placeholder(tf.float32, name='statea')
+            self.obs_ph   = tf.placeholder(tf.float32, name='obsa')
+            self.label_ph = tf.placeholder(tf.float32, name='actiona')
 
     def construct_image_input(self, nn_input, state_idx, img_idx, network_config=None):
         """Preprocess images;
@@ -91,7 +68,6 @@ class MIL(object):
 
         # image goes through 3 convnet layers
         num_filters = network_config['num_filters']
-
         im_height = network_config['image_height']
         im_width = network_config['image_width']
         num_channels = network_config['image_channels']
@@ -381,239 +357,72 @@ class MIL(object):
                     fc_output = dropout(fc_output, keep_prob=prob, is_training=is_training, name='dropout_fc_%d' % i, selu=use_selu)
         return fc_output
 
-    def construct_model(self, input_tensors=None, prefix='Training_', dim_input=27, dim_output=7, network_config=None):
-        """
-        Construct the meta-learning graph.
-        Args:
-            input_tensors: tensors of input videos, if available
-            prefix: indicate whether we are building training, validation or testing graph.
-            dim_input: Dimensionality of input.
-            dim_output: Dimensionality of the output.
-            network_config: dictionary of network structure parameters
-        Returns:
-            a tuple of output tensors.
-        """
-        # create placeholders for observations, states, and actions
-        if input_tensors is None:
-            self.obsa = obsa = tf.placeholder(tf.float32, name='obsa') # meta_batch_size x update_batch_size x dim_input
-            self.obsb = obsb = tf.placeholder(tf.float32, name='obsb')
-        else:
-            self.obsa = obsa = input_tensors['inputa'] # meta_batch_size x update_batch_size x dim_input
-            self.obsb = obsb = input_tensors['inputb']
-
-        if not hasattr(self, 'statea'):
-            self.statea = statea = tf.placeholder(tf.float32, name='statea')
-            self.stateb = stateb = tf.placeholder(tf.float32, name='stateb')
-            self.actiona = actiona = tf.placeholder(tf.float32, name='actiona')
-            self.actionb = actionb = tf.placeholder(tf.float32, name='actionb')
-        else:
-            statea = self.statea
-            stateb = self.stateb
-            actiona = self.actiona
-            actionb = self.actionb
-
-        # feed states and observations in as input to model; this provides more info that just obs
-        inputa = tf.concat(axis=2, values=[statea, obsa])
-        inputb = tf.concat(axis=2, values=[stateb, obsb])
-
+    # sets self.weights using construct_weights [checked]
+    def add_weights(self, dim_input=27, dim_output=7, network_config=None):
+        print('network config:', network_config)
         with tf.variable_scope('model', reuse=None) as training_scope:
             # Construct layers weight & bias
             if 'weights' not in dir(self):
                 if FLAGS.learn_final_eept:
+                    print('first')
                     final_eept_range = range(FLAGS.final_eept_min, FLAGS.final_eept_max)
                     self.weights = weights = self.construct_weights(dim_input, dim_output-len(final_eept_range), network_config=network_config)
                 else:
+                    print('2nd')
                     self.weights = weights = self.construct_weights(dim_input, dim_output, network_config=network_config)
                 self.sorted_weight_keys = natsorted(self.weights.keys())
             else:
+                print('3rd')
                 training_scope.reuse_variables()
                 weights = self.weights
 
-            # set hyperparameters
-            self.step_size = FLAGS.train_update_lr
-            loss_multiplier = FLAGS.loss_multiplier
-            final_eept_loss_eps = FLAGS.final_eept_loss_eps
-            act_loss_eps = FLAGS.act_loss_eps
-            use_whole_traj = FLAGS.learn_final_eept_whole_traj
+    # sets minimize op using input_tensors [checked]
+    def add_loss(self, input_tensors=None, prefix='Training_', dim_input=27, dim_output=7, network_config=None):
+        # observations are being fed in for testing
+        if input_tensors is None:
+            obsa = self.obs_ph
+        # using queue
+        else:
+            obsa = input_tensors['inputa'] 
 
-            # record losses for fine-tune and after meta update?
-            num_updates = self.num_updates
-            lossesa, outputsa = [], []
-            lossesb = [[] for _ in xrange(num_updates)]
-            outputsb = [[] for _ in xrange(num_updates)]
+        # concat states and observations in as input to model; this provides more info that just obs
+        inputa = tf.concat(axis=2, values=[self.state_ph, obsa])
+        inputa = tf.reshape(inputa, [-1, dim_input])
+        actiona = tf.reshape(self.label_ph, [-1, dim_output])
+        testing = 'Testing' in prefix
 
-            def batch_metalearn(inp): 
-                # input has two examples: action/obs a is for training on task, 
-                # action/obs b is for meta-training update
-                # this is because you need to train on the task to get the loss L_i to take grad w.r.t. initial params
-                inputa, inputb, actiona, actionb = inp 
-                inputa = tf.reshape(inputa, [-1, dim_input])
-                inputb = tf.reshape(inputb, [-1, dim_input])
-                actiona = tf.reshape(actiona, [-1, dim_output])
-                actionb = tf.reshape(actionb, [-1, dim_output])
-                gradients_summ = []
-                testing = 'Testing' in prefix
+        # for learning end effector pose
+        final_eepta = None
+        if FLAGS.learn_final_eept:
+            final_eept_range = range(FLAGS.final_eept_min, FLAGS.final_eept_max)
+            final_eepta = actiona[:, final_eept_range[0]:final_eept_range[-1]+1]
+            actiona = actiona[:, :final_eept_range[0]]
+            if FLAGS.no_final_eept:
+                final_eepta = tf.zeros_like(final_eepta)
 
-                # for learning end effector pose
-                final_eepta, final_eeptb = None, None
-                if FLAGS.learn_final_eept:
-                    final_eept_range = range(FLAGS.final_eept_min, FLAGS.final_eept_max)
-                    final_eepta = actiona[:, final_eept_range[0]:final_eept_range[-1]+1]
-                    final_eeptb = actionb[:, final_eept_range[0]:final_eept_range[-1]+1]
-                    actiona = actiona[:, :final_eept_range[0]]
-                    actionb = actionb[:, :final_eept_range[0]]
-                    if FLAGS.no_final_eept:
-                        final_eepta = tf.zeros_like(final_eepta)
+        if FLAGS.no_action:
+            actiona = tf.zeros_like(actiona)
 
-                if FLAGS.no_action:
-                    actiona = tf.zeros_like(actiona)
+        # Convert to image dims
+        inputa, _, state_inputa = self.construct_image_input(inputa, self.state_idx, self.img_idx, network_config=network_config)
+        if FLAGS.zero_state:
+            state_inputa = tf.zeros_like(state_inputa)
+        if FLAGS.no_state:
+            state_inputa = None
 
-                local_outputbs, local_lossesb, final_eept_lossesb = [], [], []
-                # Assume fixed data for each update
-                # by update they mean the number of gradient steps on loss L_i before taking derivative w.r.t inital params
-                actionas = [actiona]*num_updates
-
-                # Convert to image dims
-                inputa, _, state_inputa = self.construct_image_input(inputa, self.state_idx, self.img_idx, network_config=network_config)
-                inputb, flat_img_inputb, state_inputb = self.construct_image_input(inputb, self.state_idx, self.img_idx, network_config=network_config)
-                inputas = [inputa]*num_updates
-                inputbs = [inputb]*num_updates
-                if FLAGS.zero_state:
-                    state_inputa = tf.zeros_like(state_inputa)
-                state_inputas = [state_inputa]*num_updates
-                if FLAGS.no_state:
-                    state_inputa = None
-
-                if FLAGS.learn_final_eept:
-                    final_eeptas = [final_eepta]*num_updates
-
-
-                # euclidean loss layer = (action - mlp_out)'*precision*(action-mlp_out) = (u-uhat)'*A*(u-uhat)
-
-                # Pre-update # aka update on task, single step of GD
-                if 'Training' in prefix:
-                    local_outputa, final_eept_preda = self.forward(inputa, state_inputa, weights, network_config=network_config)
-                else:
-                    local_outputa, final_eept_preda = self.forward(inputa, state_inputa, weights, is_training=False, network_config=network_config)
-                if FLAGS.learn_final_eept:
-                    final_eept_lossa = euclidean_loss_layer(final_eept_preda, final_eepta, multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
-                else:
-                    final_eept_lossa = tf.constant(0.0)
-                local_lossa = act_loss_eps * euclidean_loss_layer(local_outputa, actiona, multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
-                if FLAGS.learn_final_eept:
-                    local_lossa += final_eept_loss_eps * final_eept_lossa
-
-                # Compute fast gradients - take GD step
-                # Do normal updates on the local_lossa
-                grads = tf.gradients(local_lossa, weights.values())
-                gradients = dict(zip(weights.keys(), grads))
-                # make fast gradient zero for weights with gradient None
-                for key in gradients.keys():
-                    if gradients[key] is None:
-                        gradients[key] = tf.zeros_like(weights[key])
-                if FLAGS.stop_grad:
-                    gradients = {key:tf.stop_gradient(gradients[key]) for key in gradients.keys()}
-                if FLAGS.clip:
-                    clip_min = FLAGS.clip_min
-                    clip_max = FLAGS.clip_max
-                    for key in gradients.keys():
-                        gradients[key] = tf.clip_by_value(gradients[key], clip_min, clip_max)
-                if FLAGS.pretrain_weight_path != 'N/A':
-                    gradients['wc1'] = tf.zeros_like(gradients['wc1'])
-                    gradients['bc1'] = tf.zeros_like(gradients['bc1'])
-                gradients_summ.append([gradients[key] for key in self.sorted_weight_keys])
-                # weird way to take GD step--but this is the update; w = w - lr*gradient; update weights for current task
-                fast_weights = dict(zip(weights.keys(), [weights[key] - self.step_size*gradients[key] for key in weights.keys()]))
-
-                # Post-update - aka meta update on demonstration b (note meta_testing=True)
-                # Compute new loss after gradient update on weights w.r.t L_i
-                if FLAGS.no_state:
-                    state_inputb = None
-                if 'Training' in prefix:
-                    outputb, final_eept_predb = self.forward(inputb, state_inputb, fast_weights, meta_testing=True, network_config=network_config)
-                else:
-                    outputb, final_eept_predb = self.forward(inputb, state_inputb, fast_weights, meta_testing=True, is_training=False, testing=testing, network_config=network_config)
-                local_outputbs.append(outputb)
-                if FLAGS.learn_final_eept: 
-                    final_eept_lossb = euclidean_loss_layer(final_eept_predb, final_eeptb, multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
-                else:
-                    final_eept_lossb = tf.constant(0.0)
-                local_lossb = act_loss_eps * euclidean_loss_layer(outputb, actionb, multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
-                if FLAGS.learn_final_eept:
-                    local_lossb += final_eept_loss_eps * final_eept_lossb
-                if use_whole_traj:
-                    # assume tbs == 1
-                    final_eept_lossb = euclidean_loss_layer(final_eept_predb[0], final_eeptb[0], multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
-                final_eept_lossesb.append(final_eept_lossb)
-                local_lossesb.append(local_lossb)
-
-                for j in range(num_updates - 1): # more input-observation pairs; num_updates = num steps of SGD to take
-                    # Pre-update
-                    state_inputa_new = state_inputas[j+1]
-                    if FLAGS.no_state:
-                        state_inputa_new = None
-                    if 'Training' in prefix:
-                        outputa, final_eept_preda = self.forward(inputas[j+1], state_inputa_new, fast_weights, network_config=network_config)
-                    else:
-                        outputa, final_eept_preda = self.forward(inputas[j+1], state_inputa_new, fast_weights, is_training=False, testing=testing, network_config=network_config)
-                    if FLAGS.learn_final_eept:
-                        final_eept_lossa = euclidean_loss_layer(final_eept_preda, final_eeptas[j+1], multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
-                    else:
-                        final_eept_lossa = tf.constant(0.0)
-                    loss = act_loss_eps * euclidean_loss_layer(outputa, actionas[j+1], multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
-                    if FLAGS.learn_final_eept:
-                        loss += final_eept_loss_eps * final_eept_lossa
-
-                    # Compute fast gradients
-                    grads = tf.gradients(loss, fast_weights.values())
-                    gradients = dict(zip(fast_weights.keys(), grads))
-                    # make fast gradient zero for weights with gradient None
-                    for key in gradients.keys():
-                        if gradients[key] is None:
-                            gradients[key] = tf.zeros_like(fast_weights[key])
-                    if FLAGS.stop_grad:
-                        gradients = {key:tf.stop_gradient(gradients[key]) for key in gradients.keys()}
-                    if FLAGS.clip:
-                        clip_min = FLAGS.clip_min
-                        clip_max = FLAGS.clip_max
-                        for key in gradients.keys():
-                            gradients[key] = tf.clip_by_value(gradients[key], clip_min, clip_max)
-                    if FLAGS.pretrain_weight_path != 'N/A':
-                        gradients['wc1'] = tf.zeros_like(gradients['wc1'])
-                        gradients['bc1'] = tf.zeros_like(gradients['bc1'])
-                    gradients_summ.append([gradients[key] for key in self.sorted_weight_keys])
-                    fast_weights = dict(zip(fast_weights.keys(), [fast_weights[key] - self.step_size*gradients[key] for key in fast_weights.keys()]))
-
-                    # Post-update
-                    if FLAGS.no_state:
-                        state_inputb = None
-                    if 'Training' in prefix:
-                        output, final_eept_predb = self.forward(inputbs[j+1], state_inputb, fast_weights, meta_testing=True, network_config=network_config)
-                    else:
-                        output, final_eept_predb = self.forward(inputbs[j+1], state_inputb, fast_weights, meta_testing=True, is_training=False, testing=testing, network_config=network_config)
-                    local_outputbs.append(output)
-                    if FLAGS.learn_final_eept:
-                        final_eept_lossb = euclidean_loss_layer(final_eept_predb, final_eeptb, multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
-                    else:
-                        final_eept_lossb = tf.constant(0.0)
-                    lossb = act_loss_eps * euclidean_loss_layer(output, actionb, multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
-                    if FLAGS.learn_final_eept:
-                        lossb += final_eept_loss_eps * final_eept_lossb
-                    if use_whole_traj:
-                        # assume tbs == 1
-                        final_eept_lossb = euclidean_loss_layer(final_eept_predb[0], final_eeptb[0], multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
-                    final_eept_lossesb.append(final_eept_lossb)
-                    local_lossesb.append(lossb)
-                # assuming this is all of the loss / gradient information needed to make take a MIL step
-                local_fn_output = [local_outputa, local_outputbs, local_outputbs[-1], local_lossa, local_lossesb, final_eept_lossesb, flat_img_inputb, gradients_summ]
-                return local_fn_output
-
-        if self.norm_type:
-            # initialize batch norm vars.
-            unused = batch_metalearn((inputa[0], inputb[0], actiona[0], actionb[0]))
-
-        out_dtype = [tf.float32, [tf.float32]*num_updates, tf.float32, tf.float32, [tf.float32]*num_updates, [tf.float32]*num_updates, tf.float32, [[tf.float32]*len(self.weights.keys())]*num_updates]
-        # creates a list of loss, gradient info to take MIL step
-        result = tf.map_fn(batch_metalearn, elems=(inputa, inputb, actiona, actionb), dtype=out_dtype)
-        print 'Done with map.'
-        return result
+        # compute loss
+        weights = self.weights
+        if 'Training' in prefix:
+            local_outputa, final_eept_preda = self.forward(inputa, state_inputa, weights, network_config=network_config)
+        else:
+            local_outputa, final_eept_preda = self.forward(inputa, state_inputa, weights, is_training=False, network_config=network_config)
+        if FLAGS.learn_final_eept:
+            final_eept_lossa = euclidean_loss_layer(final_eept_preda, final_eepta, multiplier=self.loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
+        else:
+            final_eept_lossa = tf.constant(0.0)
+        local_lossa = self.act_loss_eps * euclidean_loss_layer(local_outputa, actiona, multiplier=self.loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
+        if FLAGS.learn_final_eept:
+            local_lossa += self.final_eept_loss_eps * final_eept_lossa
+        self.loss = local_lossa
+        if 'Training' in prefix:
+            self.minimize_op = tf.train.AdamOptimizer(self.step_size).minimize(local_lossa)

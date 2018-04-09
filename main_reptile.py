@@ -5,10 +5,13 @@ import logging
 import imageio
 
 from data_generator import DataGenerator
-from mil import MIL
+from model import MIL
 from evaluation.eval_reach import evaluate_vision_reach
 from evaluation.eval_push import evaluate_push
 from tensorflow.python.platform import flags
+
+# added
+from reptile import Reptile
 
 FLAGS = flags.FLAGS
 LOGGER = logging.getLogger(__name__)
@@ -93,11 +96,8 @@ flags.DEFINE_integer('test_update_batch_size', 1, 'number of demos used during t
 flags.DEFINE_float('gpu_memory_fraction', 1.0, 'fraction of memory used in gpu')
 flags.DEFINE_bool('record_gifs', True, 'record gifs during evaluation')
 
-## LRRE 
-flags.DEFINE_bool('use_lrre', True, 'use memory module for meta learning')
 
-# TODO: how are graph and model different?
-def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
+def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0, network_config=None):
     """
     Train the model.
     """
@@ -106,7 +106,6 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
     SUMMARY_INTERVAL = 100
     SAVE_INTERVAL = 1000
     TOTAL_ITERS = FLAGS.metatrain_iterations
-    prelosses, postlosses = [], []
     save_dir = log_dir + '/model'
     train_writer = tf.summary.FileWriter(log_dir, graph)
     # actual training.
@@ -114,51 +113,87 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
         training_range = range(TOTAL_ITERS)
     else:
         training_range = range(restore_itr+1, TOTAL_ITERS)
+
+    # added
+    reptile = Reptile(sess, variables=None, transductive=True, pre_step_op=None)
+    with graph.as_default():
+        # shape T x H x W x C
+        train_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter)
+        inputa = train_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
+        inputb = train_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
+        train_input_tensors = {'inputa': inputa, 'inputb': inputb}
+        # shape T x H x W x C
+        # TODO: fix val
+        #val_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter, train=False)
+        #inputa = val_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
+        #inputb = val_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
+        #val_input_tensors = {'inputa': inputa, 'inputb': inputb}
+
     # for each training iteration
     for itr in training_range:
-        # get state action pairs
+        # get (state, action) pairs
         state, tgt_mu = data_generator.generate_data_batch(itr)
         # we split the states and actions in half ? a,b
+        # state is meta_batch_size x update_batch_size x dim_input
         statea = state[:, :FLAGS.update_batch_size*FLAGS.T, :]
         stateb = state[:, FLAGS.update_batch_size*FLAGS.T:, :]
         actiona = tgt_mu[:, :FLAGS.update_batch_size*FLAGS.T, :]
         actionb = tgt_mu[:, FLAGS.update_batch_size*FLAGS.T:, :]
-        feed_dict = {model.statea: statea,
-                    model.stateb: stateb,
-                    model.actiona: actiona,
-                    model.actionb: actionb}
-        input_tensors = [model.train_op]
+        inputa  = train_input_tensors['inputa']
+        print('inputa shape:', inputa.shape, 'statea shape:', statea.shape, 'actiona shape:', actiona.shape)
+        dataset = (actiona, statea, inputa) 
+        reptile.train_step(
+            dataset,
+            state_ph=model.state_ph,
+            label_ph=model.label_ph,
+            obs_ph=model.obs_ph,
+            minimize_op=model.minimize_op,
+            meta_step_size=FLAGS.meta_lr,
+            meta_batch_size=FLAGS.meta_batch_size
+        )
+
+        ''' 
+        TODO: not sure what to do here
         if itr % SUMMARY_INTERVAL == 0 or itr % PRINT_INTERVAL == 0:
-            input_tensors.extend([model.train_summ_op, model.total_loss1, model.total_losses2[model.num_updates-1]])
+            input_tensors.extend([model.train_summ_op])
         with graph.as_default():
-            # training takes place here *************
             results = sess.run(input_tensors, feed_dict=feed_dict)
 
         if itr != 0 and itr % SUMMARY_INTERVAL == 0:
-            prelosses.append(results[-2])
-            train_writer.add_summary(results[-3], itr)
-            postlosses.append(results[-1])
-
-        if itr != 0 and itr % PRINT_INTERVAL == 0:
-            print 'Iteration %d: average preloss is %.2f, average postloss is %.2f' % (itr, np.mean(prelosses), np.mean(postlosses))
-            prelosses, postlosses = [], []
+            train_writer.add_summary(results[-1], itr)
 
         if itr != 0 and itr % TEST_PRINT_INTERVAL == 0:
             if FLAGS.val_set_size > 0:
-                input_tensors = [model.val_summ_op, model.val_total_loss1, model.val_total_losses2[model.num_updates-1]]
+                input_tensors = [model.val_summ_op]
+                # get (state, action) pairs for validation
                 val_state, val_act = data_generator.generate_data_batch(itr, train=False)
                 statea = val_state[:, :FLAGS.update_batch_size*FLAGS.T, :]
                 stateb = val_state[:, FLAGS.update_batch_size*FLAGS.T:, :]
                 actiona = val_act[:, :FLAGS.update_batch_size*FLAGS.T, :]
                 actionb = val_act[:, FLAGS.update_batch_size*FLAGS.T:, :]
-                feed_dict = {model.statea: statea,
-                            model.stateb: stateb,
-                            model.actiona: actiona,
-                            model.actionb: actionb}
-                with graph.as_default():
-                    results = sess.run(input_tensors, feed_dict=feed_dict)
-                train_writer.add_summary(results[0], itr)
-                print 'Test results: average preloss is %.2f, average postloss is %.2f' % (np.mean(results[1]), np.mean(results[2]))
+                inputa = val_image_tensors['inputa']
+                dataset = (actiona, statea, inputa) 
+                reptile.train_step(
+                    dataset,
+                    input_ph,
+                    label_ph,
+                    minimize_op,
+                    num_classes,
+                    num_shots,
+                    inner_batch_size,
+                    inner_iters,
+                    meta_step_size,
+                    meta_batch_size
+                )
+                for task_idx in range(FLAGS.meta_batch_size):
+                    inputa = val_image_tensors['inputa']
+                    action_batch, state_batch, obs_batch = actiona[task_idx, :, :], statea[task_idx, :, :], inputa[task_idx, :, :, :]
+                    # feed them into model
+                    feed_dict = {model.state_ph : state_batch, model.label_ph : action_batch, obs_ph : obs_batch}
+                    with graph.as_default():
+                        results = sess.run(input_tensors, feed_dict=feed_dict)
+                    train_writer.add_summary(results[0], itr)
+        '''
 
         if itr != 0 and (itr % SAVE_INTERVAL == 0 or itr == training_range[-1]):
             print 'Saving model to: %s' % (save_dir + '_%d' % itr)
@@ -197,6 +232,7 @@ def generate_test_demos(data_generator):
     data_generator.selected_demo = selected_demo
 
 def main():
+    print('STARTING MAIN')
     tf.set_random_seed(FLAGS.random_seed)
     np.random.seed(FLAGS.random_seed)
     random.seed(FLAGS.random_seed)
@@ -207,10 +243,12 @@ def main():
             ob = env.reset()
             # import pdb; pdb.set_trace()
     # setup session
+    print('MAKING SESS')
     graph = tf.Graph()
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=FLAGS.gpu_memory_fraction)
     tf_config = tf.ConfigProto(gpu_options=gpu_options)
     sess = tf.Session(graph=graph, config=tf_config)
+    print('MADE SESS')
     network_config = {
         'num_filters': [FLAGS.num_filters]*FLAGS.num_conv_layers,
         'strides': [[1, 2, 2, 1]]*FLAGS.num_strides + [[1, 1, 1, 1]]*(FLAGS.num_conv_layers-FLAGS.num_strides),
@@ -258,18 +296,29 @@ def main():
 
     # put here for now
     if FLAGS.train:
+        print('FLAGS.use_noisy_demos:', FLAGS.use_noisy_demos)
         data_generator.generate_batches(noisy=FLAGS.use_noisy_demos)
         with graph.as_default():
+            '''
+            # get train image queue i.e. inputa and inputb
+            # shape T x H x W x C
             train_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter)
             inputa = train_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
             inputb = train_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
             train_input_tensors = {'inputa': inputa, 'inputb': inputb}
+            # get val image queue i.e. inputa and inputb
+            # shape T x H x W x C
             val_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter, train=False)
             inputa = val_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
             inputb = val_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
             val_input_tensors = {'inputa': inputa, 'inputb': inputb}
-        model.init_network(graph, input_tensors=train_input_tensors, restore_iter=FLAGS.restore_iter)
-        model.init_network(graph, input_tensors=val_input_tensors, restore_iter=FLAGS.restore_iter, prefix='Validation_')
+            '''
+        # setup network placeholders and forward pass etc
+        # there is no placeholder for the queue output
+        #model.init_network(graph, input_tensors=train_input_tensors, restore_iter=FLAGS.restore_iter)
+        #model.init_network(graph, input_tensors=val_input_tensors, restore_iter=FLAGS.restore_iter, prefix='Validation_')
+        model.init_network(graph, input_tensors=None, restore_iter=FLAGS.restore_iter)
+        model.init_network(graph, input_tensors=None, restore_iter=FLAGS.restore_iter, prefix='Validation_')
     else:
         model.init_network(graph, prefix='Testing')
     with graph.as_default():
@@ -291,7 +340,7 @@ def main():
             with graph.as_default():
                 saver.restore(sess, model_file)
     if FLAGS.train:
-        train(graph, model, saver, sess, data_generator, log_dir, restore_itr=FLAGS.restore_iter)
+        train(graph, model, saver, sess, data_generator, log_dir, restore_itr=FLAGS.restore_iter, network_config=network_config)
     else:
         if 'reach' in FLAGS.experiment:
             generate_test_demos(data_generator)

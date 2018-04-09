@@ -29,7 +29,7 @@ class MIL(object):
         self._dO = len(img_idx) + len(state_idx)
         self._dU = dU
 
-    def init_network(self, graph, input_tensors=None, restore_iter=0, prefix='Training_'):
+    def init_network(self, graph, input_tensors=None, restore_iter=0, prefix='Training_', algo='reptile'):
         """Helper method to initialize the tf networks used;
         takes in tf graph; initializes networks; calls construct_model; sets params based 
         on training/validation/test mode contained in prefix var
@@ -39,47 +39,61 @@ class MIL(object):
                 # map inputs to outputs
                 result = self.construct_model(input_tensors=input_tensors, prefix=prefix, dim_input=self._dO, dim_output=self._dU,
                                           network_config=self.network_params)
-            outputas, outputbs, test_output, lossesa, lossesb, final_eept_lossesb, flat_img_inputb, gradients = result
-            if 'Testing' in prefix:
-                self.obs_tensor = self.obsa
-                self.state_tensor = self.statea
-                self.test_act_op = test_output
-                self.image_op = flat_img_inputb
+            outputas, outputbs, test_output, lossesa, lossesb, final_eept_lossesb, flat_img_inputb, gradients, fast_weights = result
+            # added code for reptile
+            if algo == 'reptile':
+                # get actual weights
+                # maintain weights for each task
+                # where W_i is the pre-update fine-tune of parameters on task i
+                # w' = w - \eps 1/k sum_i^n (W_i - w)
+                # self.weights set in construct_model to pre update weights
+                weights = self.weights
+                weight_keys = self.sorted_weight_keys #= natsorted(self.weights.keys())
+                new_weights = average_vars(fast_weights)
+                # the import variables expects that weights is
+                # 
+                self._model_state.import_variables(interpolate_vars(self.weights, new_weights, meta_step_size))
+            else:
+                if 'Testing' in prefix:
+                    self.obs_tensor = self.obsa
+                    self.state_tensor = self.statea
+                    self.test_act_op = test_output
+                    self.image_op = flat_img_inputb
 
-            trainable_vars = tf.trainable_variables()
-            # pre-update losses
-            total_loss1 = tf.reduce_sum(lossesa) / tf.to_float(self.meta_batch_size)
-            # post-update losses
-            total_losses2 = [tf.reduce_sum(lossesb[j]) / tf.to_float(self.meta_batch_size) for j in range(self.num_updates)]
-            total_final_eept_losses2 = [tf.reduce_sum(final_eept_lossesb[j]) / tf.to_float(self.meta_batch_size) for j in range(self.num_updates)]
+                trainable_vars = tf.trainable_variables()
+                # pre-update losses
+                total_loss1 = tf.reduce_sum(lossesa) / tf.to_float(self.meta_batch_size)
+                # post-update losses
+                total_losses2 = [tf.reduce_sum(lossesb[j]) / tf.to_float(self.meta_batch_size) for j in range(self.num_updates)]
+                total_final_eept_losses2 = [tf.reduce_sum(final_eept_lossesb[j]) / tf.to_float(self.meta_batch_size) for j in range(self.num_updates)]
 
-            if 'Training' in prefix:
-                self.total_loss1 = total_loss1
-                self.total_losses2 = total_losses2
-                self.total_final_eept_losses2 = total_final_eept_losses2
-            elif 'Validation' in prefix:
-                self.val_total_loss1 = total_loss1
-                self.val_total_losses2 = total_losses2
-                self.val_total_final_eept_losses2 = total_final_eept_losses2
-            # TODO: add reptile in here
-            if 'Training' in prefix:
-                # TODO: figure out why we are using total_losses2[self.num_updates - 1]
-                self.train_op = tf.train.AdamOptimizer(self.meta_lr).minimize(self.total_losses2[self.num_updates - 1])
-                # Add summaries
-                summ = [tf.summary.scalar(prefix + 'Pre-update_loss', self.total_loss1)]
-                for j in xrange(self.num_updates):
-                    summ.append(tf.summary.scalar(prefix + 'Post-update_loss_step_%d' % j, self.total_losses2[j]))
-                    summ.append(tf.summary.scalar(prefix + 'Post-update_final_eept_loss_step_%d' % j, self.total_final_eept_losses2[j]))
-                    for k in xrange(len(self.sorted_weight_keys)):
-                        summ.append(tf.summary.histogram('Gradient_of_%s_step_%d' % (self.sorted_weight_keys[k], j), gradients[j][k]))
-                self.train_summ_op = tf.summary.merge(summ)
-            elif 'Validation' in prefix:
-                # Add summaries
-                summ = [tf.summary.scalar(prefix + 'Pre-update_loss', self.val_total_loss1)]
-                for j in xrange(self.num_updates):
-                    summ.append(tf.summary.scalar(prefix + 'Post-update_loss_step_%d' % j, self.val_total_losses2[j]))
-                    summ.append(tf.summary.scalar(prefix + 'Post-update_final_eept_loss_step_%d' % j, self.val_total_final_eept_losses2[j]))
-                self.val_summ_op = tf.summary.merge(summ)
+                if 'Training' in prefix:
+                    self.total_loss1 = total_loss1
+                    self.total_losses2 = total_losses2
+                    self.total_final_eept_losses2 = total_final_eept_losses2
+                elif 'Validation' in prefix:
+                    self.val_total_loss1 = total_loss1
+                    self.val_total_losses2 = total_losses2
+                    self.val_total_final_eept_losses2 = total_final_eept_losses2
+                # TODO: add reptile in here
+                if 'Training' in prefix:
+                    # TODO: figure out why we are using total_losses2[self.num_updates - 1], it is becuase you only update on loss of last fine-tune step
+                    self.train_op = tf.train.AdamOptimizer(self.meta_lr).minimize(self.total_losses2[self.num_updates - 1])
+                    # Add summaries
+                    summ = [tf.summary.scalar(prefix + 'Pre-update_loss', self.total_loss1)]
+                    for j in xrange(self.num_updates):
+                        summ.append(tf.summary.scalar(prefix + 'Post-update_loss_step_%d' % j, self.total_losses2[j]))
+                        summ.append(tf.summary.scalar(prefix + 'Post-update_final_eept_loss_step_%d' % j, self.total_final_eept_losses2[j]))
+                        for k in xrange(len(self.sorted_weight_keys)):
+                            summ.append(tf.summary.histogram('Gradient_of_%s_step_%d' % (self.sorted_weight_keys[k], j), gradients[j][k]))
+                    self.train_summ_op = tf.summary.merge(summ)
+                elif 'Validation' in prefix:
+                    # Add summaries
+                    summ = [tf.summary.scalar(prefix + 'Pre-update_loss', self.val_total_loss1)]
+                    for j in xrange(self.num_updates):
+                        summ.append(tf.summary.scalar(prefix + 'Post-update_loss_step_%d' % j, self.val_total_losses2[j]))
+                        summ.append(tf.summary.scalar(prefix + 'Post-update_final_eept_loss_step_%d' % j, self.val_total_final_eept_losses2[j]))
+                    self.val_summ_op = tf.summary.merge(summ)
 
     def construct_image_input(self, nn_input, state_idx, img_idx, network_config=None):
         """Preprocess images;
@@ -521,8 +535,10 @@ class MIL(object):
                 if FLAGS.pretrain_weight_path != 'N/A':
                     gradients['wc1'] = tf.zeros_like(gradients['wc1'])
                     gradients['bc1'] = tf.zeros_like(gradients['bc1'])
+                # add gradient for each key in sorted weight keys
                 gradients_summ.append([gradients[key] for key in self.sorted_weight_keys])
                 # weird way to take GD step--but this is the update; w = w - lr*gradient; update weights for current task
+                # fast_weights are the pre-update weights
                 fast_weights = dict(zip(weights.keys(), [weights[key] - self.step_size*gradients[key] for key in weights.keys()]))
 
                 # Post-update - aka meta update on demonstration b (note meta_testing=True)
@@ -547,6 +563,7 @@ class MIL(object):
                 final_eept_lossesb.append(final_eept_lossb)
                 local_lossesb.append(local_lossb)
 
+                # take more gradient steps using the fast_weights computed above i.e. finetune on the task for num_updates
                 for j in range(num_updates - 1): # more input-observation pairs; num_updates = num steps of SGD to take
                     # Pre-update
                     state_inputa_new = state_inputas[j+1]
@@ -605,15 +622,18 @@ class MIL(object):
                     final_eept_lossesb.append(final_eept_lossb)
                     local_lossesb.append(lossb)
                 # assuming this is all of the loss / gradient information needed to make take a MIL step
-                local_fn_output = [local_outputa, local_outputbs, local_outputbs[-1], local_lossa, local_lossesb, final_eept_lossesb, flat_img_inputb, gradients_summ]
+                local_fn_output = [local_outputa, local_outputbs, local_outputbs[-1], local_lossa, \
+                                   local_lossesb, final_eept_lossesb, flat_img_inputb, gradients_summ, fast_weights]
                 return local_fn_output
 
         if self.norm_type:
             # initialize batch norm vars.
             unused = batch_metalearn((inputa[0], inputb[0], actiona[0], actionb[0]))
 
-        out_dtype = [tf.float32, [tf.float32]*num_updates, tf.float32, tf.float32, [tf.float32]*num_updates, [tf.float32]*num_updates, tf.float32, [[tf.float32]*len(self.weights.keys())]*num_updates]
+        out_dtype = [tf.float32, [tf.float32]*num_updates, tf.float32, tf.float32, [tf.float32]*num_updates, [tf.float32]*num_updates, \
+                     tf.float32, [[tf.float32]*len(self.weights.keys())]*num_updates, [tf.float]*len(self.weights.keys())]
         # creates a list of loss, gradient info to take MIL step
+        # we are mapping over tasks in elems so each index is a task
         result = tf.map_fn(batch_metalearn, elems=(inputa, inputb, actiona, actionb), dtype=out_dtype)
         print 'Done with map.'
         return result
