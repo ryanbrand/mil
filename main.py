@@ -93,6 +93,9 @@ flags.DEFINE_integer('test_update_batch_size', 1, 'number of demos used during t
 flags.DEFINE_float('gpu_memory_fraction', 1.0, 'fraction of memory used in gpu')
 flags.DEFINE_bool('record_gifs', True, 'record gifs during evaluation')
 
+## LRRE 
+flags.DEFINE_bool('use_lrre', True, 'use memory module for meta learning')
+
 def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
     """
     Train the model.
@@ -124,6 +127,7 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
         if itr % SUMMARY_INTERVAL == 0 or itr % PRINT_INTERVAL == 0:
             input_tensors.extend([model.train_summ_op, model.total_loss1, model.total_losses2[model.num_updates-1]])
         with graph.as_default():
+            # training takes place here *************
             results = sess.run(input_tensors, feed_dict=feed_dict)
 
         if itr != 0 and itr % SUMMARY_INTERVAL == 0:
