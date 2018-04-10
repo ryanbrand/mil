@@ -4,11 +4,12 @@ import tensorflow as tf
 import logging
 import imageio
 
-from data_generator import DataGenerator
+from data_generator_reptile import DataGenerator
 from model import MIL
 from evaluation.eval_reach import evaluate_vision_reach
 from evaluation.eval_push import evaluate_push
 from tensorflow.python.platform import flags
+from tensorflow.python import debug as tf_debug
 
 # added
 from reptile import Reptile
@@ -115,19 +116,11 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0, net
         training_range = range(restore_itr+1, TOTAL_ITERS)
 
     # added
-    reptile = Reptile(sess, variables=None, transductive=True, pre_step_op=None)
     with graph.as_default():
-        # shape T x H x W x C
-        train_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter)
-        inputa = train_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
-        inputb = train_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
-        train_input_tensors = {'inputa': inputa, 'inputb': inputb}
-        # shape T x H x W x C
-        # TODO: fix val
-        #val_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter, train=False)
-        #inputa = val_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
-        #inputb = val_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
-        #val_input_tensors = {'inputa': inputa, 'inputb': inputb}
+        variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='model')
+        variables = [v for v in variables if ('b' in v.name or 'w' in v.name)]
+        print('trainable variables:', variables)
+    reptile = Reptile(sess, graph, variables=variables, transductive=True, pre_step_op=None)
 
     # for each training iteration
     for itr in training_range:
@@ -139,20 +132,18 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0, net
         stateb = state[:, FLAGS.update_batch_size*FLAGS.T:, :]
         actiona = tgt_mu[:, :FLAGS.update_batch_size*FLAGS.T, :]
         actionb = tgt_mu[:, FLAGS.update_batch_size*FLAGS.T:, :]
-        inputa  = train_input_tensors['inputa']
-        print('inputa shape:', inputa.shape, 'statea shape:', statea.shape, 'actiona shape:', actiona.shape)
-        dataset = (actiona, statea, inputa) 
+        print('statea shape:', statea.shape, 'actiona shape:', actiona.shape)
+        dataset = (actiona, statea)
         reptile.train_step(
             dataset,
             state_ph=model.state_ph,
             label_ph=model.label_ph,
-            obs_ph=model.obs_ph,
             minimize_op=model.minimize_op,
             meta_step_size=FLAGS.meta_lr,
             meta_batch_size=FLAGS.meta_batch_size
         )
 
-        ''' 
+        '''
         TODO: not sure what to do here
         if itr % SUMMARY_INTERVAL == 0 or itr % PRINT_INTERVAL == 0:
             input_tensors.extend([model.train_summ_op])
@@ -248,6 +239,7 @@ def main():
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=FLAGS.gpu_memory_fraction)
     tf_config = tf.ConfigProto(gpu_options=gpu_options)
     sess = tf.Session(graph=graph, config=tf_config)
+    #sess = tf_debug.LocalCLIDebugWrapperSession(sess)
     print('MADE SESS')
     network_config = {
         'num_filters': [FLAGS.num_filters]*FLAGS.num_conv_layers,
@@ -299,26 +291,22 @@ def main():
         print('FLAGS.use_noisy_demos:', FLAGS.use_noisy_demos)
         data_generator.generate_batches(noisy=FLAGS.use_noisy_demos)
         with graph.as_default():
-            '''
             # get train image queue i.e. inputa and inputb
             # shape T x H x W x C
             train_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter)
-            inputa = train_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
-            inputb = train_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
+            inputa = train_image_tensors[:FLAGS.update_batch_size*FLAGS.T, :]
+            inputb = train_image_tensors[FLAGS.update_batch_size*FLAGS.T:, :]
             train_input_tensors = {'inputa': inputa, 'inputb': inputb}
             # get val image queue i.e. inputa and inputb
             # shape T x H x W x C
-            val_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter, train=False)
-            inputa = val_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
-            inputb = val_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
-            val_input_tensors = {'inputa': inputa, 'inputb': inputb}
-            '''
+            #val_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter, train=False)
+            #inputa = val_image_tensors[:FLAGS.update_batch_size*FLAGS.T, :]
+            #inputb = val_image_tensors[FLAGS.update_batch_size*FLAGS.T:, :]
+            #val_input_tensors = {'inputa': inputa, 'inputb': inputb}
         # setup network placeholders and forward pass etc
         # there is no placeholder for the queue output
-        #model.init_network(graph, input_tensors=train_input_tensors, restore_iter=FLAGS.restore_iter)
+        model.init_network(graph, input_tensors=train_input_tensors, restore_iter=FLAGS.restore_iter)
         #model.init_network(graph, input_tensors=val_input_tensors, restore_iter=FLAGS.restore_iter, prefix='Validation_')
-        model.init_network(graph, input_tensors=None, restore_iter=FLAGS.restore_iter)
-        model.init_network(graph, input_tensors=None, restore_iter=FLAGS.restore_iter, prefix='Validation_')
     else:
         model.init_network(graph, prefix='Testing')
     with graph.as_default():

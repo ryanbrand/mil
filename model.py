@@ -39,7 +39,7 @@ class MIL(object):
     def init_network(self, graph, input_tensors=None, restore_iter=0, prefix='Training_'):
         with graph.as_default():
             # sets self.state_ph, self.obs_ph, self.label_ph 
-            self.add_placeholders(input_tensors)
+            self.add_placeholders()
             # sets self.weights
             self.add_weights(dim_input=self._dO, dim_output=self._dU, network_config=self.network_params)
             # sets self.minimize_op, self.loss
@@ -50,13 +50,12 @@ class MIL(object):
             self.val_summ_op = tf.summary.scalar(prefix+'loss', self.loss)
 
     # [checked]
-    def add_placeholders(self, input_tensors=None):
+    def add_placeholders(self):
         # TODO: change input to be tf.concat(axis=2, values=[statea, obsa]) elsewhere
         # Note: this is both create_placeholders and add_placeholders
-        if input_tensors is None:
-            self.state_ph = tf.placeholder(tf.float32, name='statea')
-            self.obs_ph   = tf.placeholder(tf.float32, name='obsa')
-            self.label_ph = tf.placeholder(tf.float32, name='actiona')
+        self.state_ph = tf.placeholder(tf.float32, name='statea')
+        self.obs_ph   = tf.placeholder(tf.float32, name='obsa')
+        self.label_ph = tf.placeholder(tf.float32, name='actiona')
 
     def construct_image_input(self, nn_input, state_idx, img_idx, network_config=None):
         """Preprocess images;
@@ -383,10 +382,10 @@ class MIL(object):
             obsa = self.obs_ph
         # using queue
         else:
-            obsa = input_tensors['inputa'] 
+            obsa = self.obs_ph = input_tensors['inputa'] 
 
         # concat states and observations in as input to model; this provides more info that just obs
-        inputa = tf.concat(axis=2, values=[self.state_ph, obsa])
+        inputa = tf.concat(axis=1, values=[self.state_ph, obsa])
         inputa = tf.reshape(inputa, [-1, dim_input])
         actiona = tf.reshape(self.label_ph, [-1, dim_output])
         testing = 'Testing' in prefix
