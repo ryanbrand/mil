@@ -95,6 +95,9 @@ flags.DEFINE_bool('record_gifs', True, 'record gifs during evaluation')
 
 ## LRRE 
 flags.DEFINE_bool('use_lrre', True, 'use memory module for meta learning')
+flags.DEFINE_integer('rep_dim', 128, 'dimension of keys to use in memory')
+tf.flags.DEFINE_bool('use_lsh', False, 'use locality-sensitive hashing '
+                     '(NOTE: not fully tested)')
 
 # TODO: how are graph and model different?
 def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
@@ -227,7 +230,12 @@ def main():
     state_idx = data_generator.state_idx
     img_idx = range(len(state_idx), len(state_idx)+FLAGS.im_height*FLAGS.im_width*FLAGS.num_channels)
     # need to compute x_idx and img_idx from data_generator
-    model = MIL(data_generator._dU, state_idx=state_idx, img_idx=img_idx, network_config=network_config)
+    
+    memory_size = (FLAGS.num_updates * FLAGS.update_batch_size
+    if FLAGS.memory_size is None else FLAGS.memory_size)
+    vocab_size = FLAGS.num_updates * FLAGS.update_batch_size # what is the equivalent of episode width
+    model = MIL_LRRE(data_generator._dU, FLAGS.rep_dim, memory_size, vocab_size,
+        use_lsh=FLAGS.use_lsh, state_idx=state_idx, img_idx=img_idx, network_config=network_config)
     # TODO: figure out how to save summaries and checkpoints
     exp_string = FLAGS.experiment+ '.' + FLAGS.init + '_init.' + str(FLAGS.num_conv_layers) + '_conv' + '.' + str(FLAGS.num_strides) + '_strides' + '.' + str(FLAGS.num_filters) + '_filters' + \
                 '.' + str(FLAGS.num_fc_layers) + '_fc' + '.' + str(FLAGS.layer_size) + '_dim' + '.bt_dim_' + str(FLAGS.bt_dim) + '.mbs_'+str(FLAGS.meta_batch_size) + \
