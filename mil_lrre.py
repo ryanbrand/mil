@@ -50,7 +50,7 @@ class MIL_LRRE(object):
         self.memory_size = memory_size
         self.vocab_size = vocab_size
         self.use_lsh = use_lsh
-        self.embedder = self.get_embedder() # ????
+        #self.embedder = self.get_embedder() # ????
         self.memory = self.get_memory()
         self.classifier = self.get_classifier()
         self.global_step = tf.contrib.framework.get_or_create_global_step()

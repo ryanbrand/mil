@@ -6,6 +6,7 @@ import imageio
 
 from data_generator import DataGenerator
 from mil import MIL
+from mil_lrre import MIL_LRRE
 from evaluation.eval_reach import evaluate_vision_reach
 from evaluation.eval_push import evaluate_push
 from tensorflow.python.platform import flags
@@ -98,6 +99,7 @@ flags.DEFINE_bool('use_lrre', True, 'use memory module for meta learning')
 flags.DEFINE_integer('rep_dim', 128, 'dimension of keys to use in memory')
 tf.flags.DEFINE_bool('use_lsh', False, 'use locality-sensitive hashing '
                      '(NOTE: not fully tested)')
+tf.flags.DEFINE_integer('memory_size', None, 'size of memory module')
 
 # TODO: how are graph and model different?
 def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
