@@ -70,5 +70,4 @@ class VariableState:
         """
         Restore the variables.
         """
-        print('self._variables:', self._variables)
         self._session.run(self._assign_op, feed_dict=dict(zip(self._placeholders, values)))

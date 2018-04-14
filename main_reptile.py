@@ -7,7 +7,7 @@ import imageio
 from data_generator_reptile import DataGenerator
 from model import MIL
 from evaluation.eval_reach import evaluate_vision_reach
-from evaluation.eval_push import evaluate_push
+from evaluation.reptile_eval_push import evaluate_push
 from tensorflow.python.platform import flags
 from tensorflow.python import debug as tf_debug
 
@@ -132,13 +132,16 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0, net
         stateb = state[:, FLAGS.update_batch_size*FLAGS.T:, :]
         actiona = tgt_mu[:, :FLAGS.update_batch_size*FLAGS.T, :]
         actionb = tgt_mu[:, FLAGS.update_batch_size*FLAGS.T:, :]
-        print('statea shape:', statea.shape, 'actiona shape:', actiona.shape)
+        #print('statea shape:', statea.shape, 'actiona shape:', actiona.shape)
         dataset = (actiona, statea)
         reptile.train_step(
             dataset,
             state_ph=model.state_ph,
             label_ph=model.label_ph,
             minimize_op=model.minimize_op,
+            log_op=model.train_summ_op,
+            writer=train_writer,
+            itr=itr,
             meta_step_size=FLAGS.meta_lr,
             meta_batch_size=FLAGS.meta_batch_size
         )
@@ -284,7 +287,7 @@ def main():
     if FLAGS.training_set_size != -1:
         exp_string += '.' + str(FLAGS.training_set_size) + '_trials'
 
-    log_dir = FLAGS.log_dir + '/' + exp_string
+    log_dir = FLAGS.log_dir + '/' + exp_string #+ '_reptile'
 
     # put here for now
     if FLAGS.train:
@@ -303,8 +306,6 @@ def main():
             #inputa = val_image_tensors[:FLAGS.update_batch_size*FLAGS.T, :]
             #inputb = val_image_tensors[FLAGS.update_batch_size*FLAGS.T:, :]
             #val_input_tensors = {'inputa': inputa, 'inputb': inputb}
-        # setup network placeholders and forward pass etc
-        # there is no placeholder for the queue output
         model.init_network(graph, input_tensors=train_input_tensors, restore_iter=FLAGS.restore_iter)
         #model.init_network(graph, input_tensors=val_input_tensors, restore_iter=FLAGS.restore_iter, prefix='Validation_')
     else:
