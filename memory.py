@@ -30,7 +30,8 @@ class Memory(object):
 
   def __init__(self, key_dim, memory_size, vocab_size,
                choose_k=256, alpha=0.1, correct_in_top=1, age_noise=8.0,
-               var_cache_device='', nn_device=''):
+               var_cache_device='', nn_device='', graph=None):
+
     self.key_dim = key_dim
     self.memory_size = memory_size
     self.vocab_size = vocab_size
@@ -40,8 +41,8 @@ class Memory(object):
     self.age_noise = age_noise
     self.var_cache_device = var_cache_device  # Variables are cached here.
     self.nn_device = nn_device  # Device to perform nearest neighbour matmul.
-
     caching_device = var_cache_device if var_cache_device else None
+
     self.update_memory = tf.constant(True)  # Can be fed "false" if needed.
     self.mem_keys = tf.get_variable(
         'memkeys', [self.memory_size, self.key_dim], trainable=False,
@@ -67,12 +68,20 @@ class Memory(object):
   def get(self):
     return self.mem_keys, self.mem_vals, self.mem_age, self.recent_idx
 
-  def set(self, k, v, a, r=None):
-    return tf.group(
-        self.mem_keys.assign(k),
-        self.mem_vals.assign(v),
-        self.mem_age.assign(a),
-        (self.recent_idx.assign(r) if r is not None else tf.group()))
+  def set(self, k, v, a, r=None, graph=None):
+    if graph is not None:
+        with graph.as_default():
+            return tf.group(
+                self.mem_keys.assign(k),
+                self.mem_vals.assign(v),
+                self.mem_age.assign(a),
+                (self.recent_idx.assign(r) if r is not None else tf.group()))
+    else:
+        return tf.group(
+            self.mem_keys.assign(k),
+            self.mem_vals.assign(v),
+            self.mem_age.assign(a),
+            (self.recent_idx.assign(r) if r is not None else tf.group()))
 
   def clear(self):
     return tf.variables_initializer([self.mem_keys, self.mem_vals, self.mem_age,

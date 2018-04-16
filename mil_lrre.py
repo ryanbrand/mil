@@ -29,7 +29,7 @@ class BasicClassifier(object):
 class MIL_LRRE(object):
     """ Initialize MIL. Need to call init_network to contruct the architecture after init. """
     def __init__(self, dU, rep_dim, memory_size, vocab_size,\
-        state_idx=None, img_idx=None, network_config=None, use_lsh=False):
+        state_idx=None, img_idx=None, network_config=None, use_lsh=False, graph=None):
         # MIL hyperparams
         self.num_updates = FLAGS.num_updates
         self.update_batch_size = FLAGS.update_batch_size
@@ -46,24 +46,26 @@ class MIL_LRRE(object):
         self._dU = dU
 
         # LRRE stuff
-        self.rep_dim = rep_dim
-        self.memory_size = memory_size
-        self.vocab_size = vocab_size
-        self.use_lsh = use_lsh
-        #self.embedder = self.get_embedder() # ????
-        self.memory = self.get_memory()
-        self.classifier = self.get_classifier()
-        self.global_step = tf.contrib.framework.get_or_create_global_step()
+        with graph.as_default():
+            self.rep_dim = rep_dim
+            self.memory_size = memory_size
+            self.vocab_size = vocab_size
+            self.use_lsh = use_lsh
+            #self.embedder = self.get_embedder() # ????
+            self.memory = self.get_memory()
+            self.classifier = self.get_classifier()
+            self.global_step = tf.train.get_or_create_global_step()
+            #tf.contrib.framework.get_or_create_global_step()
 
-    def get_memory(self):
+    def get_memory(self, graph=None):
         cls = memory.LSHMemory if self.use_lsh else memory.Memory 
-        return cls(self.rep_dim, self.memory_size, self.vocab_size)
+        return cls(self.rep_dim, self.memory_size, self.vocab_size, graph=graph)
 
     def clear_memory(self):
         self.memory.clear()
 
     def get_classifier(self):
-        return BasicClassifier(self.output_dim)
+        return BasicClassifier(self._dU)
 
     def core_builder(self, embeddings, state_input, keep_prob=.3, use_recent_idx=True, network_config=None):
         """TODO"""
@@ -85,10 +87,26 @@ class MIL_LRRE(object):
         takes in tf graph; initializes networks; calls construct_model; sets params based 
         on training/validation/test mode contained in prefix var
         """
+
         with graph.as_default():
             with Timer('building TF network'):
+                # setup memory "reset" ops -> ORIGIN = model.setup()
+                (self.mem_keys, self.mem_vals,
+                    self.mem_age, self.recent_idx) = self.memory.get()
+                self.mem_keys_reset = tf.placeholder(self.mem_keys.dtype,
+                    tf.identity(self.mem_keys).shape)
+                self.mem_vals_reset = tf.placeholder(self.mem_vals.dtype,
+                    tf.identity(self.mem_vals).shape)
+                self.mem_age_reset = tf.placeholder(self.mem_age.dtype,
+                    tf.identity(self.mem_age).shape)
+                self.recent_idx_reset = tf.placeholder(self.recent_idx.dtype,
+                    tf.identity(self.recent_idx).shape)
+                self.mem_reset_op = self.memory.set(self.mem_keys_reset,
+                    self.mem_vals_reset,
+                    self.mem_age_reset,
+                    None, None)
                 result = self.construct_model(input_tensors=input_tensors, prefix=prefix, dim_input=self._dO, dim_output=self._dU,
-                                          network_config=self.network_params)
+                                          network_config=self.network_params, graph=graph)
             outputas, outputbs, test_output, lossesa, lossesb, final_eept_lossesb, flat_img_inputb, gradients = result
             if 'Testing' in prefix:
                 self.obs_tensor = self.obsa
@@ -429,7 +447,7 @@ class MIL_LRRE(object):
                     fc_output = dropout(fc_output, keep_prob=prob, is_training=is_training, name='dropout_fc_%d' % i, selu=use_selu)
         return fc_output
 
-    def construct_model(self, input_tensors=None, prefix='Training_', dim_input=27, dim_output=7, network_config=None):
+    def construct_model(self, input_tensors=None, prefix='Training_', dim_input=27, dim_output=7, network_config=None, graph=None):
         """
         Construct the meta-learning graph.
         Args:
@@ -486,22 +504,6 @@ class MIL_LRRE(object):
             lossesb = [[] for _ in xrange(num_updates)]
             outputsb = [[] for _ in xrange(num_updates)]
 
-
-            # setup memory "reset" ops -> ORIGIN = model.setup()
-            (self.mem_keys, self.mem_vals,
-                self.mem_age, self.recent_idx) = self.memory.get()
-            self.mem_keys_reset = tf.placeholder(self.mem_keys.dtype,
-                tf.identity(self.mem_keys).shape)
-            self.mem_vals_reset = tf.placeholder(self.mem_vals.dtype,
-                tf.identity(self.mem_vals).shape)
-            self.mem_age_reset = tf.placeholder(self.mem_age.dtype,
-                tf.identity(self.mem_age).shape)
-            self.recent_idx_reset = tf.placeholder(self.recent_idx.dtype,
-                tf.identity(self.recent_idx).shape)
-            self.mem_reset_op = self.memory.set(self.mem_keys_reset,
-                self.mem_vals_reset,
-                self.mem_age_reset,
-                None)
 
             def batch_metalearn(inp): 
                 inputa, inputb, actiona, actionb, clear_memory = inp # input has two examples: action/obs a is for training on task, 
@@ -691,9 +693,9 @@ class MIL_LRRE(object):
 
         if self.norm_type:
             # initialize batch norm vars.
-            unused = batch_metalearn((inputa[0], inputb[0], actiona[0], actionb[0]))
+            unused = batch_metalearn((inputa[0], inputb[0], actiona[0], actionb[0], True))
 
         out_dtype = [tf.float32, [tf.float32]*num_updates, tf.float32, tf.float32, [tf.float32]*num_updates, [tf.float32]*num_updates, tf.float32, [[tf.float32]*len(self.weights.keys())]*num_updates]
-        result = tf.map_fn(batch_metalearn, elems=(inputa, inputb, actiona, actionb), dtype=out_dtype)
+        result = tf.map_fn(batch_metalearn, elems=(inputa, inputb, actiona, actionb, True), dtype=out_dtype)
         print 'Done with map.'
         return result
