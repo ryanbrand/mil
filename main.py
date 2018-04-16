@@ -5,7 +5,7 @@ import logging
 import imageio
 
 from data_generator import DataGenerator
-from mil import MIL
+from mil_reptile import MIL
 from evaluation.eval_reach import evaluate_vision_reach
 from evaluation.eval_push import evaluate_push
 from tensorflow.python.platform import flags
@@ -93,7 +93,96 @@ flags.DEFINE_integer('test_update_batch_size', 1, 'number of demos used during t
 flags.DEFINE_float('gpu_memory_fraction', 1.0, 'fraction of memory used in gpu')
 flags.DEFINE_bool('record_gifs', True, 'record gifs during evaluation')
 
-# TODO: how are graph and model different?
+def train_reptile(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
+    """
+    Train the model.
+    """
+    PRINT_INTERVAL = 100
+    TEST_PRINT_INTERVAL = PRINT_INTERVAL*5
+    SUMMARY_INTERVAL = 100
+    SAVE_INTERVAL = 1000
+    TOTAL_ITERS = FLAGS.metatrain_iterations
+    prelosses, postlosses = [], []
+    save_dir = log_dir + '/model'
+    train_writer = tf.summary.FileWriter(log_dir, graph)
+    # actual training.
+    if restore_itr == 0:
+        training_range = range(TOTAL_ITERS)
+    else:
+        training_range = range(restore_itr+1, TOTAL_ITERS)
+    # for each training iteration
+    for itr in training_range:
+        # get state action pairs
+        state, tgt_mu = data_generator.generate_data_batch(itr)
+        # we split the states and actions in half ? a,b
+        statea = state[:, :FLAGS.update_batch_size*FLAGS.T, :]
+        stateb = state[:, FLAGS.update_batch_size*FLAGS.T:, :]
+        actiona = tgt_mu[:, :FLAGS.update_batch_size*FLAGS.T, :]
+        actionb = tgt_mu[:, FLAGS.update_batch_size*FLAGS.T:, :]
+        feed_dict = {model.statea: statea,
+                    model.stateb: stateb,
+                    model.actiona: actiona,
+                    model.actionb: actionb}
+        input_tensors = [model.fast_weights]
+        with graph.as_default():
+            results = sess.run(input_tensors, feed_dict=feed_dict)
+            model.reptile_train_step()
+
+        if itr != 0 and itr % TEST_PRINT_INTERVAL == 0:
+            if FLAGS.val_set_size > 0:
+                input_tensors = [model.val_summ_op, model.val_total_loss1, model.val_total_losses2[model.num_updates-1]]
+                val_state, val_act = data_generator.generate_data_batch(itr, train=False)
+                statea = val_state[:, :FLAGS.update_batch_size*FLAGS.T, :]
+                stateb = val_state[:, FLAGS.update_batch_size*FLAGS.T:, :]
+                actiona = val_act[:, :FLAGS.update_batch_size*FLAGS.T, :]
+                actionb = val_act[:, FLAGS.update_batch_size*FLAGS.T:, :]
+                feed_dict = {model.statea: statea,
+                            model.stateb: stateb,
+                            model.actiona: actiona,
+                            model.actionb: actionb}
+                with graph.as_default():
+                    results = sess.run(input_tensors, feed_dict=feed_dict)
+                train_writer.add_summary(results[0], itr)
+                print 'Test results: average preloss is %.2f, average postloss is %.2f' % (np.mean(results[1]), np.mean(results[2]))
+
+        if itr != 0 and (itr % SAVE_INTERVAL == 0 or itr == training_range[-1]):
+            print 'Saving model to: %s' % (save_dir + '_%d' % itr)
+            with graph.as_default():
+                saver.save(sess, save_dir + '_%d' % itr)
+
+def generate_test_demos(data_generator):
+    if not FLAGS.use_noisy_demos:
+        n_folders = len(data_generator.demos.keys())
+        demos = data_generator.demos
+    else:
+        n_folders = len(data_generator.noisy_demos.keys())
+        demos = data_generator.noisy_demos
+    policy_demo_idx = [np.random.choice(n_demo, replace=False, size=FLAGS.test_update_batch_size) \
+                        for n_demo in [demos[i]['demoX'].shape[0] for i in xrange(n_folders)]]
+    selected_demoO, selected_demoX, selected_demoU = [], [], []
+    for i in xrange(n_folders):
+        selected_cond = np.array(demos[i]['demoConditions'])[np.arange(len(demos[i]['demoConditions'])) == policy_demo_idx[i]]
+        Xs, Us, Os = [], [], []
+        for idx in selected_cond:
+            if FLAGS.use_noisy_demos:
+                demo_gif_dir = data_generator.noisy_demo_gif_dir
+            else:
+                demo_gif_dir = data_generator.demo_gif_dir
+            O = np.array(imageio.mimread(demo_gif_dir + data_generator.gif_prefix + '_%d/cond%d.samp0.gif' % (i, idx)))[:, :, :, :3]
+            O = np.transpose(O, [0, 3, 2, 1]) # transpose to mujoco setting for images
+            O = O.reshape(FLAGS.T, -1) / 255.0 # normalize
+            Os.append(O)
+        Xs.append(demos[i]['demoX'][np.arange(demos[i]['demoX'].shape[0]) == policy_demo_idx[i]].squeeze())
+        Us.append(demos[i]['demoU'][np.arange(demos[i]['demoU'].shape[0]) == policy_demo_idx[i]].squeeze())
+        selected_demoO.append(np.array(Os))
+        selected_demoX.append(np.array(Xs))
+        selected_demoU.append(np.array(Us))
+    print "Finished collecting demos for testing"
+    selected_demo = dict(selected_demoX=selected_demoX, selected_demoU=selected_demoU, selected_demoO=selected_demoO)
+    data_generator.selected_demo = selected_demo
+
+
+
 def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
     """
     Train the model.
@@ -252,6 +341,7 @@ def main():
 
     log_dir = FLAGS.log_dir + '/' + exp_string
 
+    print('above train')
     # put here for now
     if FLAGS.train:
         data_generator.generate_batches(noisy=FLAGS.use_noisy_demos)
@@ -264,6 +354,7 @@ def main():
             inputa = val_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
             inputb = val_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
             val_input_tensors = {'inputa': inputa, 'inputb': inputb}
+        print('MADE IT')
         model.init_network(graph, input_tensors=train_input_tensors, restore_iter=FLAGS.restore_iter)
         model.init_network(graph, input_tensors=val_input_tensors, restore_iter=FLAGS.restore_iter, prefix='Validation_')
     else:
@@ -287,7 +378,7 @@ def main():
             with graph.as_default():
                 saver.restore(sess, model_file)
     if FLAGS.train:
-        train(graph, model, saver, sess, data_generator, log_dir, restore_itr=FLAGS.restore_iter)
+        train_reptile(graph, model, saver, sess, data_generator, log_dir, restore_itr=FLAGS.restore_iter)
     else:
         if 'reach' in FLAGS.experiment:
             generate_test_demos(data_generator)
