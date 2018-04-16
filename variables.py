@@ -51,13 +51,14 @@ class VariableState:
     """
     Manage the state of a set of variables.
     """
-    def __init__(self, session, variables):
+    def __init__(self, session, graph, variables):
         self._session = session
         self._variables = variables
-        self._placeholders = [tf.placeholder(v.dtype.base_dtype, shape=v.get_shape())
-                              for v in variables]
-        assigns = [tf.assign(v, p) for v, p in zip(self._variables, self._placeholders)]
-        self._assign_op = tf.group(*assigns)
+        with graph.as_default():
+            self._placeholders = [tf.placeholder(v.dtype.base_dtype, shape=v.get_shape())
+                                  for v in variables]
+            assigns = [tf.assign(v, p) for v, p in zip(self._variables, self._placeholders)]
+            self._assign_op = tf.group(*assigns)
 
     def export_variables(self):
         """

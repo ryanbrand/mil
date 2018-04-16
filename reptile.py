@@ -12,10 +12,10 @@ class Reptile:
     allowed to leak between test samples via BatchNorm.
     Typically, MAML is used in a transductive manner.
     """
-    def __init__(self, session, variables=None, transductive=False, pre_step_op=None):
+    def __init__(self, session, graph, variables=None, transductive=False, pre_step_op=None):
         self.session = session
-        self._model_state = VariableState(self.session, variables or tf.trainable_variables())
-        self._full_state = VariableState(self.session,
+        self._model_state = VariableState(self.session, graph, variables or tf.trainable_variables())
+        self._full_state = VariableState(self.session, graph,
                                          tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES))
         self._transductive = transductive
         self._pre_step_op = pre_step_op
@@ -25,8 +25,10 @@ class Reptile:
                    dataset,
                    state_ph,
                    label_ph,
-                   obs_ph,
                    minimize_op,
+                   log_op,
+                   writer,
+                   itr,
                    meta_step_size,
                    meta_batch_size):
         """
@@ -47,24 +49,18 @@ class Reptile:
           meta_step_size: interpolation coefficient.
           meta_batch_size: how many inner-loops to run.
         """
-        print('train step')
         old_vars = self._model_state.export_variables()
         new_vars = []
-        actiona, statea, inputa = dataset 
+        actiona, statea = dataset 
         for task_idx in range(meta_batch_size):
-            print('task:', task_idx)
             action_batch = actiona[task_idx, :, :]
             state_batch  = statea[task_idx, :, :]
-            print('getting obs batch:')
-            obs_batch    = self.session.run(inputa[task_idx, :, :])
             # was in loop
-            print('pre step op:')
             if self._pre_step_op:
-                print('running pre step')
                 self.session.run(self._pre_step_op)
-            feed_dict = {state_ph : state_batch, label_ph : action_batch, obs_ph : obs_batch}
-            print('running minimize_op')
-            self.session.run(minimize_op, feed_dict=feed_dict)
+            feed_dict = {state_ph : state_batch, label_ph : action_batch}
+            _, summary = self.session.run([minimize_op, log_op], feed_dict=feed_dict)
+            writer.add_summary(summary, itr + itr * task_idx)
             # out of loop
             new_vars.append(self._model_state.export_variables())
             self._model_state.import_variables(old_vars)

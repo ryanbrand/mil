@@ -38,25 +38,30 @@ class MIL(object):
     # [checked]
     def init_network(self, graph, input_tensors=None, restore_iter=0, prefix='Training_'):
         with graph.as_default():
-            # sets self.state_ph, self.obs_ph, self.label_ph 
-            self.add_placeholders(input_tensors)
+            # sets self.state_ph, self.obs_ph, self.label_ph
+            self.add_placeholders()
             # sets self.weights
             self.add_weights(dim_input=self._dO, dim_output=self._dU, network_config=self.network_params)
-            # sets self.minimize_op, self.loss
+            # sets self.minimize_op, self.loss, test_act_op
             self.add_loss(input_tensors=input_tensors, prefix=prefix, dim_input=self._dO, dim_output=self._dU, network_config=self.network_params)
         if 'Training' in prefix:
             self.train_summ_op = tf.summary.scalar(prefix+'loss', self.loss)
         elif 'Validation' in prefix:
             self.val_summ_op = tf.summary.scalar(prefix+'loss', self.loss)
+        #elif 'Testing' in prefix:
+            # vars used for testing
+            # note need to rewrite eval_push to work with reptile
+            # note need to think about testing process for reptile
+            # not sure if it involves meta train step
+            # figure out what test_act_op is
 
     # [checked]
-    def add_placeholders(self, input_tensors=None):
+    def add_placeholders(self):
         # TODO: change input to be tf.concat(axis=2, values=[statea, obsa]) elsewhere
         # Note: this is both create_placeholders and add_placeholders
-        if input_tensors is None:
-            self.state_ph = tf.placeholder(tf.float32, name='statea')
-            self.obs_ph   = tf.placeholder(tf.float32, name='obsa')
-            self.label_ph = tf.placeholder(tf.float32, name='actiona')
+        self.state_ph = tf.placeholder(tf.float32, name='statea')
+        self.obs_ph   = tf.placeholder(tf.float32, name='obsa')
+        self.label_ph = tf.placeholder(tf.float32, name='actiona')
 
     def construct_image_input(self, nn_input, state_idx, img_idx, network_config=None):
         """Preprocess images;
@@ -383,10 +388,11 @@ class MIL(object):
             obsa = self.obs_ph
         # using queue
         else:
-            obsa = input_tensors['inputa'] 
+            obsa = self.obs_ph = input_tensors['inputa'] 
 
         # concat states and observations in as input to model; this provides more info that just obs
-        inputa = tf.concat(axis=2, values=[self.state_ph, obsa])
+        print('state_ph shape:', self.state_ph.get_shape(), 'obsa shape:', obsa.get_shape())
+        inputa = tf.concat(axis=1, values=[self.state_ph, obsa])
         inputa = tf.reshape(inputa, [-1, dim_input])
         actiona = tf.reshape(self.label_ph, [-1, dim_output])
         testing = 'Testing' in prefix
@@ -416,13 +422,16 @@ class MIL(object):
             local_outputa, final_eept_preda = self.forward(inputa, state_inputa, weights, network_config=network_config)
         else:
             local_outputa, final_eept_preda = self.forward(inputa, state_inputa, weights, is_training=False, network_config=network_config)
-        if FLAGS.learn_final_eept:
-            final_eept_lossa = euclidean_loss_layer(final_eept_preda, final_eepta, multiplier=self.loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
-        else:
-            final_eept_lossa = tf.constant(0.0)
-        local_lossa = self.act_loss_eps * euclidean_loss_layer(local_outputa, actiona, multiplier=self.loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
-        if FLAGS.learn_final_eept:
-            local_lossa += self.final_eept_loss_eps * final_eept_lossa
-        self.loss = local_lossa
+
         if 'Training' in prefix:
+            if FLAGS.learn_final_eept:
+                final_eept_lossa = euclidean_loss_layer(final_eept_preda, final_eepta, multiplier=self.loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
+            else:
+                final_eept_lossa = tf.constant(0.0)
+            local_lossa = self.act_loss_eps * euclidean_loss_layer(local_outputa, actiona, multiplier=self.loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
+            if FLAGS.learn_final_eept:
+                local_lossa += self.final_eept_loss_eps * final_eept_lossa
+            self.loss = local_lossa
             self.minimize_op = tf.train.AdamOptimizer(self.step_size).minimize(local_lossa)
+        # action that is taken in test script
+        self.test_act_op = local_outputa

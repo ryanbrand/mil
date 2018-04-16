@@ -4,15 +4,11 @@ import tensorflow as tf
 import logging
 import imageio
 
-from data_generator_reptile import DataGenerator
-from model import MIL
+from data_generator import DataGenerator
+from mil_lrre import MIL_LRRE
 from evaluation.eval_reach import evaluate_vision_reach
-from evaluation.reptile_eval_push import evaluate_push
+from evaluation.eval_push import evaluate_push
 from tensorflow.python.platform import flags
-from tensorflow.python import debug as tf_debug
-
-# added
-from reptile import Reptile
 
 FLAGS = flags.FLAGS
 LOGGER = logging.getLogger(__name__)
@@ -97,8 +93,15 @@ flags.DEFINE_integer('test_update_batch_size', 1, 'number of demos used during t
 flags.DEFINE_float('gpu_memory_fraction', 1.0, 'fraction of memory used in gpu')
 flags.DEFINE_bool('record_gifs', True, 'record gifs during evaluation')
 
+## LRRE 
+flags.DEFINE_bool('use_lrre', True, 'use memory module for meta learning')
+flags.DEFINE_integer('rep_dim', 7, 'dimension of keys to use in memory')
+tf.flags.DEFINE_bool('use_lsh', False, 'use locality-sensitive hashing '
+                     '(NOTE: not fully tested)')
+tf.flags.DEFINE_integer('memory_size', None, 'size of memory module')
 
-def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0, network_config=None):
+# TODO: how are graph and model different?
+def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
     """
     Train the model.
     """
@@ -107,6 +110,7 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0, net
     SUMMARY_INTERVAL = 100
     SAVE_INTERVAL = 1000
     TOTAL_ITERS = FLAGS.metatrain_iterations
+    prelosses, postlosses = [], []
     save_dir = log_dir + '/model'
     train_writer = tf.summary.FileWriter(log_dir, graph)
     # actual training.
@@ -114,80 +118,51 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0, net
         training_range = range(TOTAL_ITERS)
     else:
         training_range = range(restore_itr+1, TOTAL_ITERS)
-
-    # added
-    with graph.as_default():
-        variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='model')
-        variables = [v for v in variables if ('b' in v.name or 'w' in v.name)]
-        print('trainable variables:', variables)
-    reptile = Reptile(sess, graph, variables=variables, transductive=True, pre_step_op=None)
-
     # for each training iteration
     for itr in training_range:
-        # get (state, action) pairs
+        # get state action pairs
         state, tgt_mu = data_generator.generate_data_batch(itr)
         # we split the states and actions in half ? a,b
-        # state is meta_batch_size x update_batch_size x dim_input
         statea = state[:, :FLAGS.update_batch_size*FLAGS.T, :]
         stateb = state[:, FLAGS.update_batch_size*FLAGS.T:, :]
         actiona = tgt_mu[:, :FLAGS.update_batch_size*FLAGS.T, :]
         actionb = tgt_mu[:, FLAGS.update_batch_size*FLAGS.T:, :]
-        #print('statea shape:', statea.shape, 'actiona shape:', actiona.shape)
-        dataset = (actiona, statea)
-        reptile.train_step(
-            dataset,
-            state_ph=model.state_ph,
-            label_ph=model.label_ph,
-            minimize_op=model.minimize_op,
-            log_op=model.train_summ_op,
-            writer=train_writer,
-            itr=itr,
-            meta_step_size=FLAGS.meta_lr,
-            meta_batch_size=FLAGS.meta_batch_size
-        )
-
-        '''
-        TODO: not sure what to do here
+        feed_dict = {model.statea: statea,
+                    model.stateb: stateb,
+                    model.actiona: actiona,
+                    model.actionb: actionb}
+        input_tensors = [model.train_op]
         if itr % SUMMARY_INTERVAL == 0 or itr % PRINT_INTERVAL == 0:
-            input_tensors.extend([model.train_summ_op])
+            input_tensors.extend([model.train_summ_op, model.total_loss1, model.total_losses2[model.num_updates-1]])
         with graph.as_default():
+            # training takes place here *************
             results = sess.run(input_tensors, feed_dict=feed_dict)
 
         if itr != 0 and itr % SUMMARY_INTERVAL == 0:
-            train_writer.add_summary(results[-1], itr)
+            prelosses.append(results[-2])
+            train_writer.add_summary(results[-3], itr)
+            postlosses.append(results[-1])
+
+        if itr != 0 and itr % PRINT_INTERVAL == 0:
+            print 'Iteration %d: average preloss is %.2f, average postloss is %.2f' % (itr, np.mean(prelosses), np.mean(postlosses))
+            prelosses, postlosses = [], []
 
         if itr != 0 and itr % TEST_PRINT_INTERVAL == 0:
             if FLAGS.val_set_size > 0:
-                input_tensors = [model.val_summ_op]
-                # get (state, action) pairs for validation
+                input_tensors = [model.val_summ_op, model.val_total_loss1, model.val_total_losses2[model.num_updates-1]]
                 val_state, val_act = data_generator.generate_data_batch(itr, train=False)
                 statea = val_state[:, :FLAGS.update_batch_size*FLAGS.T, :]
                 stateb = val_state[:, FLAGS.update_batch_size*FLAGS.T:, :]
                 actiona = val_act[:, :FLAGS.update_batch_size*FLAGS.T, :]
                 actionb = val_act[:, FLAGS.update_batch_size*FLAGS.T:, :]
-                inputa = val_image_tensors['inputa']
-                dataset = (actiona, statea, inputa) 
-                reptile.train_step(
-                    dataset,
-                    input_ph,
-                    label_ph,
-                    minimize_op,
-                    num_classes,
-                    num_shots,
-                    inner_batch_size,
-                    inner_iters,
-                    meta_step_size,
-                    meta_batch_size
-                )
-                for task_idx in range(FLAGS.meta_batch_size):
-                    inputa = val_image_tensors['inputa']
-                    action_batch, state_batch, obs_batch = actiona[task_idx, :, :], statea[task_idx, :, :], inputa[task_idx, :, :, :]
-                    # feed them into model
-                    feed_dict = {model.state_ph : state_batch, model.label_ph : action_batch, obs_ph : obs_batch}
-                    with graph.as_default():
-                        results = sess.run(input_tensors, feed_dict=feed_dict)
-                    train_writer.add_summary(results[0], itr)
-        '''
+                feed_dict = {model.statea: statea,
+                            model.stateb: stateb,
+                            model.actiona: actiona,
+                            model.actionb: actionb}
+                with graph.as_default():
+                    results = sess.run(input_tensors, feed_dict=feed_dict)
+                train_writer.add_summary(results[0], itr)
+                print 'Test results: average preloss is %.2f, average postloss is %.2f' % (np.mean(results[1]), np.mean(results[2]))
 
         if itr != 0 and (itr % SAVE_INTERVAL == 0 or itr == training_range[-1]):
             print 'Saving model to: %s' % (save_dir + '_%d' % itr)
@@ -226,7 +201,6 @@ def generate_test_demos(data_generator):
     data_generator.selected_demo = selected_demo
 
 def main():
-    print('STARTING MAIN')
     tf.set_random_seed(FLAGS.random_seed)
     np.random.seed(FLAGS.random_seed)
     random.seed(FLAGS.random_seed)
@@ -237,13 +211,10 @@ def main():
             ob = env.reset()
             # import pdb; pdb.set_trace()
     # setup session
-    print('MAKING SESS')
     graph = tf.Graph()
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=FLAGS.gpu_memory_fraction)
     tf_config = tf.ConfigProto(gpu_options=gpu_options)
     sess = tf.Session(graph=graph, config=tf_config)
-    #sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-    print('MADE SESS')
     network_config = {
         'num_filters': [FLAGS.num_filters]*FLAGS.num_conv_layers,
         'strides': [[1, 2, 2, 1]]*FLAGS.num_strides + [[1, 1, 1, 1]]*(FLAGS.num_conv_layers-FLAGS.num_strides),
@@ -260,7 +231,12 @@ def main():
     state_idx = data_generator.state_idx
     img_idx = range(len(state_idx), len(state_idx)+FLAGS.im_height*FLAGS.im_width*FLAGS.num_channels)
     # need to compute x_idx and img_idx from data_generator
-    model = MIL(data_generator._dU, state_idx=state_idx, img_idx=img_idx, network_config=network_config)
+    
+    memory_size = (FLAGS.num_updates * FLAGS.update_batch_size
+    if FLAGS.memory_size is None else FLAGS.memory_size)
+    vocab_size = (state_idx+img_idx) * FLAGS.update_batch_size # dim input = sum of idxs
+    model = MIL_LRRE(data_generator._dU, FLAGS.rep_dim, memory_size, vocab_size,
+        use_lsh=FLAGS.use_lsh, state_idx=state_idx, img_idx=img_idx, network_config=network_config, graph=graph)
     # TODO: figure out how to save summaries and checkpoints
     exp_string = FLAGS.experiment+ '.' + FLAGS.init + '_init.' + str(FLAGS.num_conv_layers) + '_conv' + '.' + str(FLAGS.num_strides) + '_strides' + '.' + str(FLAGS.num_filters) + '_filters' + \
                 '.' + str(FLAGS.num_fc_layers) + '_fc' + '.' + str(FLAGS.layer_size) + '_dim' + '.bt_dim_' + str(FLAGS.bt_dim) + '.mbs_'+str(FLAGS.meta_batch_size) + \
@@ -287,27 +263,22 @@ def main():
     if FLAGS.training_set_size != -1:
         exp_string += '.' + str(FLAGS.training_set_size) + '_trials'
 
-    log_dir = FLAGS.log_dir + '/' + exp_string #+ '_reptile'
+    log_dir = FLAGS.log_dir + '/' + exp_string
 
     # put here for now
     if FLAGS.train:
-        print('FLAGS.use_noisy_demos:', FLAGS.use_noisy_demos)
         data_generator.generate_batches(noisy=FLAGS.use_noisy_demos)
         with graph.as_default():
-            # get train image queue i.e. inputa and inputb
-            # shape T x H x W x C
             train_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter)
-            inputa = train_image_tensors[:FLAGS.update_batch_size*FLAGS.T, :]
-            inputb = train_image_tensors[FLAGS.update_batch_size*FLAGS.T:, :]
+            inputa = train_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
+            inputb = train_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
             train_input_tensors = {'inputa': inputa, 'inputb': inputb}
-            # get val image queue i.e. inputa and inputb
-            # shape T x H x W x C
-            #val_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter, train=False)
-            #inputa = val_image_tensors[:FLAGS.update_batch_size*FLAGS.T, :]
-            #inputb = val_image_tensors[FLAGS.update_batch_size*FLAGS.T:, :]
-            #val_input_tensors = {'inputa': inputa, 'inputb': inputb}
+            val_image_tensors = data_generator.make_batch_tensor(network_config, restore_iter=FLAGS.restore_iter, train=False)
+            inputa = val_image_tensors[:, :FLAGS.update_batch_size*FLAGS.T, :]
+            inputb = val_image_tensors[:, FLAGS.update_batch_size*FLAGS.T:, :]
+            val_input_tensors = {'inputa': inputa, 'inputb': inputb}
         model.init_network(graph, input_tensors=train_input_tensors, restore_iter=FLAGS.restore_iter)
-        #model.init_network(graph, input_tensors=val_input_tensors, restore_iter=FLAGS.restore_iter, prefix='Validation_')
+        model.init_network(graph, input_tensors=val_input_tensors, restore_iter=FLAGS.restore_iter, prefix='Validation_')
     else:
         model.init_network(graph, prefix='Testing')
     with graph.as_default():
@@ -329,7 +300,7 @@ def main():
             with graph.as_default():
                 saver.restore(sess, model_file)
     if FLAGS.train:
-        train(graph, model, saver, sess, data_generator, log_dir, restore_itr=FLAGS.restore_iter, network_config=network_config)
+        train(graph, model, saver, sess, data_generator, log_dir, restore_itr=FLAGS.restore_iter)
     else:
         if 'reach' in FLAGS.experiment:
             generate_test_demos(data_generator)
