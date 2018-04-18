@@ -9,7 +9,7 @@ from tf_utils import *
 from utils import Timer
 from natsort import natsorted
 
-import memory # lrre memory module
+import memory_orig as memory # lrre memory module
 
 FLAGS = flags.FLAGS
 
@@ -59,7 +59,7 @@ class MIL_LRRE(object):
 
     def get_memory(self, graph=None):
         cls = memory.LSHMemory if self.use_lsh else memory.Memory 
-        return cls(self.rep_dim, self.memory_size, self.vocab_size, graph=graph)
+        return cls(self.rep_dim, self.memory_size, self.vocab_size, choose_k=self._dU-3)
 
     def clear_memory(self):
         self.memory.clear()
@@ -67,15 +67,19 @@ class MIL_LRRE(object):
     def get_classifier(self):
         return BasicClassifier(self._dU)
 
-    def core_builder(self, embeddings, state_input, keep_prob=.3, use_recent_idx=True, network_config=None):
+    def core_builder(self, inp, embeddings, action, keep_prob=.3, use_recent_idx=False, network_config=None):
         """TODO"""
        # Construct layers weight & bias
         #embeddings, eept_pred = self.forward(image_input, state_input, weights, network_config=network_config)
-
+        #action = tf.reshape(action, [-1,self._dU])
+        #action = tf.reshape(action, [-1])
+        #embeddings = tf.reshape(embeddings, [-1])
+        print "embeddings: " + str(tf.shape(embeddings))
+        embeddings = tf.Print(embeddings, [tf.shape(embeddings)], 'embed: ')
         memory_val, _, teacher_loss = self.memory.query(embeddings,
-            state_input, use_recent_idx=use_recent_idx)
-        loss, state_pred = self.classifier.core_builder(memory_val, image_input, state_input)
-        return loss + teacher_loss, state_pred
+            action, use_recent_idx=use_recent_idx)
+        loss, action_pred = self.classifier.core_builder(memory_val, inp, action)
+        return loss + teacher_loss, tf.reshape(action_pred, [-1, self._dU])
 
     def get_xy_placeholders(self):
         """TODO"""
@@ -506,7 +510,8 @@ class MIL_LRRE(object):
 
 
             def batch_metalearn(inp): 
-                inputa, inputb, actiona, actionb, clear_memory = inp # input has two examples: action/obs a is for training on task, 
+                inputa, inputb, actiona, actionb = inp # input has two examples: action/obs a is for training on task, 
+                clear_memory = True
                 # action/obs b is for meta-training update
                 inputa = tf.reshape(inputa, [-1, dim_input])
                 inputb = tf.reshape(inputb, [-1, dim_input])
@@ -565,13 +570,13 @@ class MIL_LRRE(object):
                 
                 # memory 
                 if FLAGS.use_lrre:
-                    mem_loss, local_outputa = self.core_builder(local_outputa, actiona, keep_prob=0.3)
+                    mem_loss, local_outputa = self.core_builder(inputa, local_outputa, actiona, keep_prob=0.3)
 
                 local_lossa = act_loss_eps * euclidean_loss_layer(local_outputa, actiona, multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
                 
                 # memory 
                 if FLAGS.use_lrre:
-                    loss += act_loss_eps * mem_loss # should try diff epsilons
+                    local_lossa += act_loss_eps * mem_loss # should try diff epsilons
 
                 # end effector position auxiliary loss 
                 if FLAGS.learn_final_eept:
@@ -636,7 +641,7 @@ class MIL_LRRE(object):
                     
                     # memory 
                     if FLAGS.use_lrre:
-                        mem_loss, local_outputa = self.core_builder(local_outputa, actiona, keep_prob=0.3)
+                        mem_loss, local_outputa = self.core_builder(inputas[j+1], local_outputa, actiona, keep_prob=0.3)
 
                     loss = act_loss_eps * euclidean_loss_layer(outputa, actionas[j+1], multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
                 
@@ -693,9 +698,9 @@ class MIL_LRRE(object):
 
         if self.norm_type:
             # initialize batch norm vars.
-            unused = batch_metalearn((inputa[0], inputb[0], actiona[0], actionb[0], True))
+            unused = batch_metalearn((inputa[0], inputb[0], actiona[0], actionb[0]))
 
         out_dtype = [tf.float32, [tf.float32]*num_updates, tf.float32, tf.float32, [tf.float32]*num_updates, [tf.float32]*num_updates, tf.float32, [[tf.float32]*len(self.weights.keys())]*num_updates]
-        result = tf.map_fn(batch_metalearn, elems=(inputa, inputb, actiona, actionb, True), dtype=out_dtype)
+        result = tf.map_fn(batch_metalearn, elems=(inputa, inputb, actiona, actionb), dtype=out_dtype)
         print 'Done with map.'
         return result

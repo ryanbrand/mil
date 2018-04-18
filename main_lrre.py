@@ -18,10 +18,10 @@ flags.DEFINE_string('experiment', 'sim_reach', 'sim_vision_reach or sim_push')
 flags.DEFINE_string('demo_file', None, 'path to the directory where demo files that containing robot states and actions are stored')
 flags.DEFINE_string('demo_gif_dir', None, 'path to the videos of demonstrations')
 flags.DEFINE_string('gif_prefix', 'object', 'prefix of the video directory for each task, e.g. object_0 for task 0')
-flags.DEFINE_integer('im_width', 100, 'width of the images in the demo videos,  125 for sim_push, and 80 for sim_vision_reach')
-flags.DEFINE_integer('im_height', 90, 'height of the images in the demo videos, 125 for sim_push, and 64 for sim_vision_reach')
+flags.DEFINE_integer('im_width', 125, 'width of the images in the demo videos,  125 for sim_push, and 80 for sim_vision_reach')
+flags.DEFINE_integer('im_height', 125, 'height of the images in the demo videos, 125 for sim_push, and 64 for sim_vision_reach')
 flags.DEFINE_integer('num_channels', 3, 'number of channels of the images in the demo videos')
-flags.DEFINE_integer('T', 50, 'time horizon of the demo videos, 50 for reach, 100 for push')
+flags.DEFINE_integer('T', 100, 'time horizon of the demo videos, 50 for reach, 100 for push')
 flags.DEFINE_bool('hsv', False, 'convert the image to HSV format')
 flags.DEFINE_bool('use_noisy_demos', False, 'use noisy demonstrations or not (for domain shift)')
 flags.DEFINE_string('noisy_demo_gif_dir', None, 'path to the videos of noisy demonstrations')
@@ -31,16 +31,16 @@ flags.DEFINE_bool('no_state', False, 'do not include states in the demonstration
 flags.DEFINE_bool('no_final_eept', False, 'do not include final ee pos in the demonstrations for inner update')
 flags.DEFINE_bool('zero_state', False, 'zero-out states (meta-learn state) in the demonstrations for inner update')
 flags.DEFINE_bool('two_arms', False, 'use two-arm structure when state is zeroed-out')
-flags.DEFINE_integer('training_set_size', -1, 'size of the training set, 1500 for sim_reach, 693 for sim push, and \
+flags.DEFINE_integer('training_set_size', 693, 'size of the training set, 1500 for sim_reach, 693 for sim push, and \
                                                 -1 for all data except those in validation set')
-flags.DEFINE_integer('val_set_size', 150, 'size of the training set, 150 for sim_reach and 76 for sim push')
+flags.DEFINE_integer('val_set_size', 76, 'size of the training set, 150 for sim_reach and 76 for sim push')
 
 ## Training options
-flags.DEFINE_integer('metatrain_iterations', 50000, 'number of metatraining iterations.') # 30k for pushing, 50k for reaching and placing
-flags.DEFINE_integer('meta_batch_size', 12, 'number of tasks sampled per meta-update') # 5 for reaching, 15 for pushing, 12 for placing
+flags.DEFINE_integer('metatrain_iterations', 30000, 'number of metatraining iterations.') # 30k for pushing, 50k for reaching and placing
+flags.DEFINE_integer('meta_batch_size', 15, 'number of tasks sampled per meta-update') # 5 for reaching, 15 for pushing, 12 for placing
 flags.DEFINE_float('meta_lr', 0.001, 'the base learning rate of the generator')
 flags.DEFINE_integer('update_batch_size', 1, 'number of examples used for inner gradient update (K for K-shot learning).')
-flags.DEFINE_float('train_update_lr', 1e-3, 'step size alpha for inner gradient update.') # 0.001 for reaching, 0.01 for pushing and placing
+flags.DEFINE_float('train_update_lr', .01, 'step size alpha for inner gradient update.') # 0.001 for reaching, 0.01 for pushing and placing
 flags.DEFINE_integer('num_updates', 1, 'number of inner gradient updates during training.') # 5 for placing
 flags.DEFINE_bool('clip', False, 'use gradient clipping for fast gradient')
 flags.DEFINE_float('clip_max', 10.0, 'maximum clipping value for fast gradient')
@@ -120,6 +120,7 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
         training_range = range(restore_itr+1, TOTAL_ITERS)
     # for each training iteration
     for itr in training_range:
+        if itr != 0 and itr % 5 == 0: print 'Training Iter %d / %d' % (itr, training_range);
         # get state action pairs
         state, tgt_mu = data_generator.generate_data_batch(itr)
         # we split the states and actions in half ? a,b
@@ -232,9 +233,9 @@ def main():
     img_idx = range(len(state_idx), len(state_idx)+FLAGS.im_height*FLAGS.im_width*FLAGS.num_channels)
     # need to compute x_idx and img_idx from data_generator
     
-    memory_size = (FLAGS.num_updates * FLAGS.update_batch_size
+    memory_size = (FLAGS.T * FLAGS.meta_batch_size * FLAGS.num_updates
     if FLAGS.memory_size is None else FLAGS.memory_size)
-    vocab_size = (state_idx+img_idx) * FLAGS.update_batch_size # dim input = sum of idxs
+    vocab_size = (len(state_idx+img_idx)) * FLAGS.update_batch_size # dim input = sum of idxs
     model = MIL_LRRE(data_generator._dU, FLAGS.rep_dim, memory_size, vocab_size,
         use_lsh=FLAGS.use_lsh, state_idx=state_idx, img_idx=img_idx, network_config=network_config, graph=graph)
     # TODO: figure out how to save summaries and checkpoints
