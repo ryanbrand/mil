@@ -199,11 +199,14 @@ class Memory(object):
         hint_pool_sims3d * (1 - teacher_hints), k=1)
 
     # bring back idxs to full memory
+    print 'teacher hint idxs: ' + str(teacher_hint_idxs.get_shape())
+    teacher_hint_idxs = tf.Print(teacher_hint_idxs, [tf.shape(teacher_hint_idxs)], 't hint idxs: ')
     teacher_hint_idxs = tf.squeeze(teacher_hint_idxs, [2]) # MAYBE
-    teacher_hint_idxs = tf.clip_by_value(teacher_hint_idxs, 0, batch_size-1)
+    # hint pool idxs initially [bsize,choose_k](+1) if use recent idx
+    #teacher_hint_idxs = tf.clip_by_value(teacher_hint_idxs, 0, batch_size-1)
     teacher_idxs = tf.gather(
-        tf.reshape(hint_pool_idxs, [-1, choose_k]),
-        teacher_hint_idxs[:, 1] + choose_k * tf.range(batch_size))
+        tf.reshape(hint_pool_idxs, [-1]),
+        tf.clip_by_value(teacher_hint_idxs[:, 1] + choose_k * tf.range(batch_size),0,batch_size-1))
     print "teacher idxs: " + str(teacher_idxs.get_shape())
 
     # zero-out teacher_vals if there are no hints
@@ -241,10 +244,10 @@ class Memory(object):
     flat_fetched_idxs = tf.reshape(fetched_idxs, [-1])
     flat_vals = tf.reshape(self.mem_vals, [-1])
     with tf.device(self.var_cache_device):
-      fetched_keys = tf.gather_nd(flat_keys, flat_fetched_idxs, name='fetched_keys')
-      fetched_keys = tf.reshape(fetched_keys, [-1, self.key_dim])
-      fetched_vals = tf.gather_nd(flat_vals, flat_fetched_idxs, name='fetched_vals')
-      fetched_vals = tf.reshape(fetched_vals, [-1, self.key_dim])
+      fetched_keys = tf.gather(self.mem_keys, fetched_idxs, name='fetched_keys')
+      #fetched_keys = tf.reshape(fetched_keys, [-1, choose_k])
+      fetched_vals = tf.gather(self.mem_vals, fetched_idxs, name='fetched_vals')
+      #fetched_vals = tf.reshape(fetched_vals, [-1, choose_k])
 
     # do memory updates here
     print "WHY"

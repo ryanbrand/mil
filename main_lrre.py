@@ -120,7 +120,7 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
         training_range = range(restore_itr+1, TOTAL_ITERS)
     # for each training iteration
     for itr in training_range:
-        if itr != 0 and itr % 5 == 0: print 'Training Iter %d / %d' % (itr, training_range);
+        if itr != 0 and itr % 5 == 0: print 'Training Iter %d / %d' % (itr, TOTAL_ITERS);
         # get state action pairs
         state, tgt_mu = data_generator.generate_data_batch(itr)
         # we split the states and actions in half ? a,b
