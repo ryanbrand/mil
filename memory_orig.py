@@ -147,7 +147,7 @@ class Memory(object):
       mask: The affinity of the query to the result.
       teacher_loss: The loss for training the memory module.
     """
-    query_vec = tf.Print(query_vec, [query_vec], "query: ")
+    #query_vec = tf.Print(query_vec, [query_vec], "query: ")
     #print str(tf.shape(query_vec))
     batch_size = tf.shape(query_vec)[0]
     output_given = intended_output is not None

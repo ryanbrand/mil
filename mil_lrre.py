@@ -74,8 +74,8 @@ class MIL_LRRE(object):
         #action = tf.reshape(action, [-1,self._dU])
         #action = tf.reshape(action, [-1])
         #embeddings = tf.reshape(embeddings, [-1])
-        print "embeddings: " + str(tf.shape(embeddings))
-        embeddings = tf.Print(embeddings, [tf.shape(embeddings)], 'embed: ')
+        #print "embeddings: " + str(tf.shape(embeddings))
+        #embeddings = tf.Print(embeddings, [tf.shape(embeddings)], 'embed: ')
         memory_val, _, teacher_loss = self.memory.query(embeddings,
             action, use_recent_idx=use_recent_idx)
         loss, action_pred = self.classifier.core_builder(memory_val, inp, action)
