@@ -148,7 +148,7 @@ class Memory(object):
       teacher_loss: The loss for training the memory module.
     """
     query_vec = tf.Print(query_vec, [query_vec], "query: ")
-    print str(tf.shape(query_vec))
+    #print str(tf.shape(query_vec))
     batch_size = tf.shape(query_vec)[0]
     output_given = intended_output is not None
 
@@ -165,7 +165,7 @@ class Memory(object):
       hint_pool_idxs = tf.concat(
           axis=2,
           values=[hint_pool_idxs, most_recent_hint_idx]) #tf.expand_dims(most_recent,1)
-    hint_pool_idxs = tf.Print(hint_pool_idxs, [tf.shape(hint_pool_idxs)], 'hint pool idx concat: ')
+    #hint_pool_idxs = tf.Print(hint_pool_idxs, [tf.shape(hint_pool_idxs)], 'hint pool idx concat: ')
     choose_k = tf.shape(hint_pool_idxs)[1]
 
     with tf.device(self.var_cache_device):
@@ -199,18 +199,18 @@ class Memory(object):
         hint_pool_sims3d * (1 - teacher_hints), k=1)
 
     # bring back idxs to full memory
-    print 'teacher hint idxs: ' + str(teacher_hint_idxs.get_shape())
-    teacher_hint_idxs = tf.Print(teacher_hint_idxs, [tf.shape(teacher_hint_idxs)], 't hint idxs: ')
+    #print 'teacher hint idxs: ' + str(teacher_hint_idxs.get_shape())
+    #teacher_hint_idxs = tf.Print(teacher_hint_idxs, [tf.shape(teacher_hint_idxs)], 't hint idxs: ')
     teacher_hint_idxs = tf.squeeze(teacher_hint_idxs, [2]) # MAYBE
     # hint pool idxs initially [bsize,choose_k](+1) if use recent idx
     #teacher_hint_idxs = tf.clip_by_value(teacher_hint_idxs, 0, batch_size-1)
     teacher_idxs = tf.gather(
         tf.reshape(hint_pool_idxs, [-1]),
         tf.clip_by_value(teacher_hint_idxs[:, 1] + choose_k * tf.range(batch_size),0,batch_size-1))
-    print "teacher idxs: " + str(teacher_idxs.get_shape())
+    #print "teacher idxs: " + str(teacher_idxs.get_shape())
 
     # zero-out teacher_vals if there are no hints
-    teacher_vals = tf.Print(teacher_vals, [tf.shape(teacher_vals), tf.shape(teacher_hints)], 'teachers! ')
+    #teacher_vals = tf.Print(teacher_vals, [tf.shape(teacher_vals), tf.shape(teacher_hints)], 'teachers! ')
     teacher_vals *= (
         1 - tf.to_float(tf.equal(0.0, tf.expand_dims(tf.reduce_sum(teacher_hints, 2),2)))) # MAYBE WRONG WAY!
 
@@ -225,7 +225,7 @@ class Memory(object):
     # memory was queried correctly
     sliced_hints = tf.slice(teacher_hints, [0, 0, 0], [-1, -1, self.correct_in_top])
     incorrect_memory_lookup = tf.equal(0.0, tf.reduce_sum(tf.reduce_sum(sliced_hints, 2), 1))
-    print "incorrect lookup: " + str(incorrect_memory_lookup.get_shape())
+    #print "incorrect lookup: " + str(incorrect_memory_lookup.get_shape())
 
     # loss based on triplet loss
     teacher_loss = (tf.nn.relu(neg_teacher_vals - teacher_vals + self.alpha)
@@ -239,7 +239,7 @@ class Memory(object):
     update_vals = intended_output
 
     fetched_idxs = teacher_idxs  # correctly fetched from memory
-    print "fetched idxs: " + str(fetched_idxs.get_shape())
+    #print "fetched idxs: " + str(fetched_idxs.get_shape())
     flat_keys = tf.reshape(self.mem_keys, [-1])
     flat_fetched_idxs = tf.reshape(fetched_idxs, [-1])
     flat_vals = tf.reshape(self.mem_vals, [-1])
@@ -250,12 +250,12 @@ class Memory(object):
       #fetched_vals = tf.reshape(fetched_vals, [-1, choose_k])
 
     # do memory updates here
-    print "WHY"
-    print update_keys.get_shape()
-    print fetched_keys.get_shape()
-    print fetched_idxs.get_shape()
-    print self.mem_keys.get_shape()
-    print teacher_hint_idxs.get_shape()
+    #print "WHY"
+    #print update_keys.get_shape()
+    #print fetched_keys.get_shape()
+    #print fetched_idxs.get_shape()
+    #print self.mem_keys.get_shape()
+    #print teacher_hint_idxs.get_shape()
     fetched_keys_upd = update_keys + fetched_keys  # Momentum-like update
     fetched_keys_upd = tf.nn.l2_normalize(fetched_keys_upd, dim=1)
     # Randomize age a bit, e.g., to select different ones in parallel workers.
@@ -264,8 +264,8 @@ class Memory(object):
 
     ##########
     
-    mem_age_with_noise = tf.Print(mem_age_with_noise, [tf.shape(mem_age_with_noise)], 'mem age: ')
-    batch_size = tf.Print(batch_size, [batch_size], "batch size")
+    #mem_age_with_noise = tf.Print(mem_age_with_noise, [tf.shape(mem_age_with_noise)], 'mem age: ')
+    #batch_size = tf.Print(batch_size, [batch_size], "batch size")
     _, oldest_idxs = tf.nn.top_k(mem_age_with_noise, k=batch_size, sorted=False)
     oldest_flat = tf.reshape(oldest_idxs, [-1,1])
     oldest_2d = tf.tile(oldest_flat, [1, self.key_dim])

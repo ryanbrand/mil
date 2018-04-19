@@ -105,7 +105,7 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
     """
     Train the model.
     """
-    PRINT_INTERVAL = 100
+    PRINT_INTERVAL = 50 # 100 normally
     TEST_PRINT_INTERVAL = PRINT_INTERVAL*5
     SUMMARY_INTERVAL = 100
     SAVE_INTERVAL = 1000
