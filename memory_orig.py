@@ -165,6 +165,7 @@ class Memory(object):
       hint_pool_idxs = tf.concat(
           axis=2,
           values=[hint_pool_idxs, most_recent_hint_idx]) #tf.expand_dims(most_recent,1)
+    hint_pool_idxs = tf.Print(hint_pool_idxs, [tf.shape(hint_pool_idxs)], 'hint pool idx concat: ')
     choose_k = tf.shape(hint_pool_idxs)[1]
 
     with tf.device(self.var_cache_device):
@@ -199,14 +200,16 @@ class Memory(object):
 
     # bring back idxs to full memory
     teacher_hint_idxs = tf.squeeze(teacher_hint_idxs, [2]) # MAYBE
+    teacher_hint_idxs = tf.clip_by_value(teacher_hint_idxs, 0, batch_size-1)
     teacher_idxs = tf.gather(
         tf.reshape(hint_pool_idxs, [-1, choose_k]),
         teacher_hint_idxs[:, 1] + choose_k * tf.range(batch_size))
     print "teacher idxs: " + str(teacher_idxs.get_shape())
 
     # zero-out teacher_vals if there are no hints
+    teacher_vals = tf.Print(teacher_vals, [tf.shape(teacher_vals), tf.shape(teacher_hints)], 'teachers! ')
     teacher_vals *= (
-        1 - tf.to_float(tf.equal(0.0, tf.reduce_sum(teacher_hints, 1))))
+        1 - tf.to_float(tf.equal(0.0, tf.expand_dims(tf.reduce_sum(teacher_hints, 2),2)))) # MAYBE WRONG WAY!
 
     # prepare returned values
     nearest_neighbor = tf.to_int32(
