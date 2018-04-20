@@ -25,9 +25,12 @@ class MILDataGenerator(object):
             self.bias  = None
 
         self.train_data = self._load_data(train_dir)
+        print('finished loading train data')
         self.test_data  = self._load_data(test_dir)
+        print('finished loading test data')
 
     def _load_data(self, data_dir):
+        print('loading data from:', data_dir)
         # get all of the .pkl file paths
         pickle_paths = glob(os.path.join(data_dir, '*.pkl'))
         pickle_paths = natsorted(pickle_paths)
@@ -36,22 +39,23 @@ class MILDataGenerator(object):
         demo_gif_paths = glob(os.path.join(data_dir, 'object_*'))
         demo_gif_paths = natsorted(demo_gif_paths)
 
-        for pickle, demo_gif in zip(pickle_paths, demo_gif_paths):
-            yield  MILTask(demo_gif, pickle, self.scale, self.bias)
-
+        data = []
+        for i, (pickle, demo_gif) in enumerate(zip(pickle_paths, demo_gif_paths)):
+            print('creating task: ', str(i))
+            data.append(MILTask(demo_gif, pickle, self.scale, self.bias))
+        return data
 
 class MILTask(object):
 
     def __init__(self, gif_demo_path, pickle_path, scale=None, bias=None):
-        gif_paths = natsorted([os.path.join(gif_demo_path, f) for f in glob(os.path.join(gif_demo_path, '*.gif'))])
-        self.num_trials = len(gif_paths)
-        self.gifs = self._read_gifs(gif_paths)
-        #print('gifs shape:', self.gifs.shape)
-        self.states, self.actions = self._read_pickle(pickle_path, scale, bias)
-        self.state_dim = self.states.shape[-1]
-        self.action_dim = self.actions.shape[-1]
-        self.gif_dim    = self.gifs.shape[-3:]
-        self.T          = self.states.shape[1]
+        self.gif_paths  = np.array(natsorted([os.path.join(gif_demo_path, f) for f in glob(os.path.join(gif_demo_path, '*.gif'))]))
+        self.num_trials = len(self.gif_paths)
+        self.pickle_path = pickle_path
+        self.scale, self.bias = scale, bias
+        self._cache  = {}
+        self.states  = None
+        self.actions = None
+        self.gifs    = None
 
     # dimension of input to construct model: 20 + 46875 = dim_input
     # forward called on [update_batch_size, dim_input]
@@ -63,13 +67,32 @@ class MILTask(object):
         returns: (gifs, states, actions) tuple where gifs: num_samples X 100 X H X W X C
                  states: num_samples X 100 X 20, actions: num_samples X 100 X 7
         '''
-        # TODO: figure out if each time-step is treated as a seperate example?
-        H, W, C = self.gif_dim
+        print('sampling num_samples', str(num_samples), 'from task:', self.pickle_path)
+        # load states and actions first time sample is called
+        if not isinstance(self.gifs, np.ndarray):
+            self.states, self.actions = self._read_pickle(self.pickle_path, self.scale, self.bias)
+            self.state_dim  = self.states.shape[-1]
+            self.action_dim = self.actions.shape[-1]
+            self.T          = self.states.shape[1]
+            #self.gifs       = np.zeros(shape=(self.num_trials, self.T, 3, 125, 125))
+
         sample_idxs = np.random.choice(self.num_trials, size=num_samples)
-        gifs = self.gifs[sample_idxs].reshape(num_samples*self.T, -1)
-        states = self.states[sample_idxs].reshape(num_samples*self.T, self.state_dim)
+        # read gifs on the fly when sampled
+        #sample_idxs_paths = zip(sample_idxs, self.gif_paths[sample_idxs])
+        #read_idxs, gifs_to_read = zip(*[(idx, gif_path) for idx, gif_path in sample_idxs_paths if gif_path not in self._cache])
+        #if len(gifs_to_read) > 0:
+        #    new_gifs = self._read_gifs(gifs_to_read)
+        #    self.gifs[read_idxs, :, :, :, :] = new_gifs
+        #    for gif_path in gifs_to_read:
+        #        self._cache[gif_path] = True
+        # sample gifs and states
+        #gifs = self.gifs[sample_idxs].reshape(num_samples*self.T, -1)
+        # sample every time to save memory
+        gifs    = self._read_gifs(self.gif_paths[sample_idxs]).reshape(num_samples*self.T, -1)
+        states  = self.states[sample_idxs].reshape(num_samples*self.T, self.state_dim)
         actions = self.actions[sample_idxs].reshape(num_samples*self.T, self.action_dim)
         return (gifs, states, actions)
+
 
     def _read_gifs(self, gif_paths):
         gifs = np.stack([imageio.mimread(gif_path) for gif_path in gif_paths])

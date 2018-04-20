@@ -69,19 +69,23 @@ class Reptile:
         old_vars = self._model_state.export_variables()
         new_vars = []
         losses   = []
+        print('taking train step')
         for _ in range(meta_batch_size):
             # sample n classes and k+1 examples from each class
             # k*n for training and 1*n for testing
-            mini_dataset = _sample_mini_dataset(dataset, num_classes, num_shots)
+            mini_dataset = _sample_mini_dataset_mil(dataset, num_classes, num_shots)
             # for each task in the mini_dataset
             for batch in _mini_batches(mini_dataset, inner_batch_size, inner_iters):
-                inputs, labels = zip(*batch)
-                gifs, states, actions = inputs
+                gifs    = np.concatenate([t[0] for t in batch], axis=0)
+                states  = np.concatenate([t[1] for t in batch], axis=0)
+                actions = np.concatenate([t[2] for t in batch], axis=0)
                 if self._pre_step_op:
                     self.session.run(self._pre_step_op)
                 # take a gradient step
                 feed_dict = {state_ph: states, obs_ph : gifs, label_ph: actions}
+                print('taking gradient step')
                 _, loss = self.session.run([minimize_op, loss_op], feed_dict=feed_dict)
+                print('took graident step on loss:', loss)
                 losses.append(loss)
             # store the new variables
             new_vars.append(self._model_state.export_variables())
@@ -91,6 +95,7 @@ class Reptile:
         self._model_state.import_variables(interpolate_vars(old_vars, new_vars, meta_step_size))
         # add loss summary
         summary = tf.Summary()
+        print('ave loss:', np.mean(losses))
         summary.value.add(tag='ave_loss', simple_value=np.mean(losses))
         writer.add_summary(summary, step)
 
@@ -222,6 +227,22 @@ class FOML(Reptile):
         for batch in _mini_batches(train, inner_batch_size, inner_iters - 1):
             yield batch
         yield tail
+
+def _sample_mini_dataset_mil(dataset, num_classes, num_shots):
+    """
+    Sample a few shot task from a dataset.
+
+    Returns:
+      An iterable of (input, label) pairs.
+    """
+    shuffled = list(dataset)
+    random.shuffle(shuffled)
+    for class_idx, class_obj in enumerate(shuffled[:num_classes]):
+        gifs, states, actions = class_obj.sample(num_shots)
+        for shot_idx in range(num_shots):
+            start_idx, end_idx = shot_idx*class_obj.T, (shot_idx + 1)*class_obj.T
+            g, s, a = gifs[start_idx:end_idx], states[start_idx:end_idx], actions[start_idx:end_idx]
+            yield (g, s, a)
 
 def _sample_mini_dataset(dataset, num_classes, num_shots):
     """

@@ -125,7 +125,7 @@ def train(graph, model, saver, sess, log_dir, restore_itr=0, network_config=None
     # for each training iteration
     for itr in training_range:
         reptile.train_step(
-            dataset,
+            dataset.train_data,
             state_ph=model.state_ph,
             obs_ph=model.obs_ph,
             label_ph=model.label_ph,
@@ -237,7 +237,7 @@ def main():
     if FLAGS.training_set_size != -1:
         exp_string += '.' + str(FLAGS.training_set_size) + '_trials'
 
-    log_dir = FLAGS.log_dir + '/' + exp_string #+ '_reptile'
+    log_dir = FLAGS.log_dir + '/' + exp_string + '_reptile_new_data'
 
     # put here for now
     if FLAGS.train:
@@ -248,7 +248,7 @@ def main():
         model.init_network(graph, prefix='Testing')
     with graph.as_default():
         # Set up saver.
-        saver = tf.train.Saver(max_to_keep=10)
+        saver = tf.train.Saver(max_to_keep=30)
         # Initialize variables.
         init_op = tf.global_variables_initializer()
         sess.run(init_op, feed_dict=None)
