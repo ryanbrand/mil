@@ -4,6 +4,7 @@ import tensorflow as tf
 import logging
 import imageio
 
+from data_generator import DataGenerator
 from new_data_generator_reptile import MILDataGenerator
 from model import MIL
 from evaluation.eval_reach import evaluate_vision_reach
@@ -265,6 +266,7 @@ def main():
     if FLAGS.train:
         train(graph, model, saver, sess, log_dir, restore_itr=FLAGS.restore_iter, network_config=network_config)
     else:
+        data_generator = DataGenerator()
         if 'reach' in FLAGS.experiment:
             generate_test_demos(data_generator)
             evaluate_vision_reach(env, graph, model, data_generator, sess, exp_string, FLAGS.record_gifs, log_dir)
