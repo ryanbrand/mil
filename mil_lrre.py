@@ -576,7 +576,7 @@ class MIL_LRRE(object):
                 
                 # memory 
                 if FLAGS.use_lrre:
-                    local_lossa += act_loss_eps * mem_loss # should try diff epsilons
+                    local_lossa += 0.5 * act_loss_eps * mem_loss # should try diff epsilons
 
                 # end effector position auxiliary loss 
                 if FLAGS.learn_final_eept:
@@ -647,7 +647,7 @@ class MIL_LRRE(object):
                 
                     # memory
                     if FLAGS.use_lrre:
-                        loss += act_loss_eps * mem_loss # should try diff epsilons
+                        loss += 0.5 * act_loss_eps * mem_loss # should try diff epsilons
                     
                     # end effector position auxiliary loss
                     if FLAGS.learn_final_eept:
