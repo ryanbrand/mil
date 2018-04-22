@@ -36,7 +36,10 @@ def evaluate_vision_reach(env, graph, model, data_generator, sess, exp_string, r
                     # import pdb; pdb.set_trace()
                     env.render()
                     time.sleep(0.05)
-                    obs, state = env.get_current_image_obs()
+                    if 'get_current_image_obs' in dir(env):
+                        obs, state = env.get_current_image_obs()
+		    else:
+                        obs, state = env.unwrapped.get_current_image_obs() 	
                     Os.append(obs)
                     obs = np.transpose(obs, [2, 1, 0]) / 255.0
                     obs = obs.reshape(1, 1, -1)
