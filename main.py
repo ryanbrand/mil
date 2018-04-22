@@ -3,6 +3,7 @@ import random
 import tensorflow as tf
 import logging
 import imageio
+import gym
 
 from data_generator import DataGenerator
 from mil import MIL
@@ -271,6 +272,7 @@ def main():
         # Start queue runners (used for loading videos on the fly)
         tf.train.start_queue_runners(sess=sess)
     if FLAGS.resume:
+        print(log_dir)
         model_file = tf.train.latest_checkpoint(log_dir)
         if FLAGS.restore_iter > 0:
             model_file = model_file[:model_file.index('model')] + 'model_' + str(FLAGS.restore_iter)
