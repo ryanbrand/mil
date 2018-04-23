@@ -100,11 +100,12 @@ class Reptile:
         writer.add_summary(summary, step)
 
     def evaluate(self,
-                 dataset,
-                 input_ph,
+                 dataset, # (train_example, test_example)
+                 state_ph,
+                 obs_ph,
                  label_ph,
                  minimize_op,
-                 predictions,
+                 predictions, # not using predictions for now
                  num_classes,
                  num_shots,
                  inner_batch_size,
@@ -133,19 +134,46 @@ class Reptile:
           The number of correctly predicted samples.
             This always ranges from 0 to num_classes.
         """
-        train_set, test_set = _split_train_test(
-            _sample_mini_dataset(dataset, num_classes, num_shots+1))
+        # get train and test split, assuming that test is always one example from each class
+        # we know that we only use two examples so ignore this
+        #train_set, test_set = _split_train_test(
+        #    _sample_mini_dataset(dataset, num_classes, num_shots+1))
+
+        train_example, test_example = dataset
+        statea, obsa, actiona = train_example
+        train_feed_dict = {
+            state_ph : statea,
+            obs_ph   : obsa,
+            label_ph : actiona 
+        }
+        stateb, obsb = test_example
+        test_feed_dict = {
+            state_ph : stateb,
+            obsb     : obsa
+        }
+
+        # save model variables for update
         old_vars = self._full_state.export_variables()
-        for batch in _mini_batches(train_set, inner_batch_size, inner_iters):
-            inputs, labels = zip(*batch)
+        # removed for reptile
+        #for batch in _mini_batches(train_set, inner_batch_size, inner_iters):
+        #    inputs, labels = zip(*batch)
+
+        for i in range(inner_iters):
             if self._pre_step_op:
                 self.session.run(self._pre_step_op)
-            self.session.run(minimize_op, feed_dict={input_ph: inputs, label_ph: labels})
-        test_preds = self._test_predictions(train_set, test_set, input_ph, predictions)
-        num_correct = sum([pred == sample[1] for pred, sample in zip(test_preds, test_set)])
-        self._full_state.import_variables(old_vars)
-        return num_correct
+            self.session.run(minimize_op, feed_dict=train_feed_dict)
 
+        # compute predicted values for the newly trained model
+        # TODO: should the data be passed in together for some reason?
+        # test_preds = self._test_predictions(train_set, test_set, input_ph, predictions)
+        # num_correct = sum([pred == sample[1] for pred, sample in zip(test_preds, test_set)])
+        action = self.sess.run(predictions, feed_dict=test_feed_dict)
+        # reset back to the old variables for the next evaluation
+        self._full_state.import_variables(old_vars)
+        #return num_correct
+        return action
+
+    # TODO: figure out if we should evaluate transductively
     def _test_predictions(self, train_set, test_set, input_ph, predictions):
         if self._transductive:
             inputs, _ = zip(*test_set)
@@ -153,7 +181,7 @@ class Reptile:
         res = []
         for test_sample in test_set:
             inputs, _ = zip(*train_set)
-            inputs += (test_sample[0],)
+            inputs += (test_sample[0],)  # this passes in the training set and the test set?
             res.append(self.session.run(predictions, feed_dict={input_ph: inputs})[-1])
         return res
 
