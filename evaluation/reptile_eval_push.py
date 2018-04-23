@@ -28,7 +28,8 @@ class TFAgent(object):
         with graph.as_default():
             variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='model')
             variables = [v for v in variables if ('b' in v.name or 'w' in v.name)]
-        self.reptile = Reptile(sess, graph, variables=variables, transductive=True, pre_step_op=None)
+        # TODO: try transductive and non-transductive options
+        self.reptile = Reptile(sess, graph, variables=variables, transductive=False, pre_step_op=None)
 
         if scale_bias_file:
             self.scale, self.bias = load_scale_and_bias(scale_bias_file)

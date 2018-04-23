@@ -168,7 +168,13 @@ class Reptile:
         # TODO: should the data be passed in together for some reason?
         # test_preds = self._test_predictions(train_set, test_set, input_ph, predictions)
         # num_correct = sum([pred == sample[1] for pred, sample in zip(test_preds, test_set)])
-        action = self.session.run(predictions, feed_dict=test_feed_dict)
+        # try non-transductive procedure
+        if self._transductive == False: # there appears to be a very small difference when using this option
+            all_state, all_obs = np.concatenate([statea, stateb], axis=0), np.concatenate([obsa, obsb], axis=0)
+            action = self.session.run(predictions, feed_dict={state_ph : all_state, obs_ph : all_obs})
+            action = action[-1]
+        else:
+            action = self.session.run(predictions, feed_dict=test_feed_dict)
         # reset back to the old variables for the next evaluation
         self._full_state.import_variables(old_vars)
         #return num_correct
