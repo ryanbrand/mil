@@ -105,7 +105,7 @@ class TFAgent(object):
                 self.model.state_ph,
                 self.model.obs_ph,
                 self.model.label_ph,
-                self.model.minimize_op
+                self.model.minimize_op,
                 self.model.test_act_op,
                 num_classes=None,      # not used
                 num_shots=None,        # not used
