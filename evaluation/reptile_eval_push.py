@@ -17,6 +17,9 @@ CROP = False
 sys.path.append('/home/rmb2208/gym/gym')
 from gym.envs.mujoco.pusher import PusherEnv
 
+# added for reptile
+from reptile_new_data import *
+
 class TFAgent(object):
     def __init__(self, model, scale_bias_file, sess):
         self.sess = sess
@@ -44,6 +47,7 @@ class TFAgent(object):
         self.demoX = demoX
         self.demoU = demoU
 
+    # TODO: this is probably wrong, you need to do some sort of reptile update here
     def get_action(self, obs):
         obs = obs.reshape((1,1,23))
         # old feed dict
@@ -51,6 +55,8 @@ class TFAgent(object):
         #  self.model.actiona: self.demoU,
         #  self.model.stateb: obs.dot(self.scale) + self.bias}
         # new feed dict
+        #evaluate(dataset, input_ph, label_ph, minimize_op, predictions, num_classes, num_shots, inner_batch_size, inner_iters)
+        # get v1 working just pass in the data
         feed_dict = {
             self.model.state_ph : obs.dot(self.scale) + self.bias,
             self.model.label_ph : None  #TODO: not sure if this should be here
@@ -58,6 +64,7 @@ class TFAgent(object):
         action = self.sess.run(self.model.test_act_op, feed_dict=feed_dict)
         return action, dict()
 
+    # TODO: this is probably wrong, you need to do some sort of reptile update here
     def get_vision_action(self, image, obs, t=-1):
         if CROP:
             image = np.array(Image.fromarray(image).crop((40,25,120,90)))
@@ -78,13 +85,33 @@ class TFAgent(object):
             #  self.model.stateb: obs.dot(self.scale) + self.bias,
             #  self.model.obsb: image}
             # new feed dict
-            state = obs.dot(self.scale) + self.bias
-            feed_dict = {
-                self.model.state_ph : state,
-                self.model.obs_ph : image,
-                self.model.label_ph : None # note we don't have this
-            }
-            action = self.sess.run(self.model.test_act_op, feed_dict=feed_dict)
+
+            # TODO: check that training data only comes from one class
+            # train
+            statea = self.demoX.dot(self.scale) + self.bias
+            obsa = self.demoVideo
+            actiona = self.demoU
+            train_data = (statea, obsa, actiona)
+            # test
+            stateb = obs.dot(self.scale) + self.bias
+            obsb = image
+            test_data = (stateb, obsb)
+            dataset = (train_data, test_data)
+
+            # do an update on the model parameters
+            #TODO: somewhere create reptile class instance
+            action = reptile.evaluate(
+                dataset,
+                self.model.state_ph,
+                self.model.obs_ph,
+                self.model.label_ph,
+                self.model.minimize_op
+                self.model.test_act_op,
+                num_classes=None,      # not used
+                num_shots=None,        # not used
+                inner_batch_size=None, # not used
+                inner_iters=1 # TODO: see if you want to change this
+            )
         else:
             print('WARNING: scale is None, case not considered')
             # old feed dict
@@ -162,11 +189,11 @@ def evaluate_push(sess, graph, model, data_generator, exp_string, log_dir, demo_
         policy.set_demo(demo_gifs, demoX, demoU)
 
         returns = []
-        gif_dir = log_dir + '/evaluated_gifs/'
+        gif_dir = log_dir + '/evaluated_gifs_task_' + str(task_id) + '/'
         mkdir_p(gif_dir)
 
         while True:
-            video_suffix = gif_dir + str(id) + 'demo_' + str(num_input_demos) + '_' + str(len(returns)) + '.gif'
+            video_suffix = gif_dir + 'demo_' + str(num_input_demos) + '_' + str(len(returns)) + '.gif'
             path = rollout(env, policy, max_path_length=100, env_reset=True,
                            animated=True, speedup=1, always_return_paths=True, save_video=save_video, video_filename=video_suffix, vision=True)
             num_trials += 1
