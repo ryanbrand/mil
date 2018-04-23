@@ -117,7 +117,7 @@ class TFAgent(object):
                 num_classes=None,      # not used
                 num_shots=None,        # not used
                 inner_batch_size=None, # not used
-                inner_iters=1 # TODO: see if you want to change this
+                inner_iters=5          # TODO: see if you want to change this
             )
         else:
             print('WARNING: scale is None, case not considered')
