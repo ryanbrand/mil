@@ -144,14 +144,15 @@ class Reptile:
         train_feed_dict = {
             state_ph : statea,
             obs_ph   : obsa,
-            label_ph : actiona 
+            label_ph : actiona
         }
+        #print('statea:', statea.shape, 'obsa:', obsa.shape, 'actiona:', actiona.shape)
         stateb, obsb = test_example
         test_feed_dict = {
             state_ph : stateb,
-            obsb     : obsa
+            obs_ph   : obsb
         }
-
+        #print('stateb:', stateb.shape, 'obsb:', obsb.shape)
         # save model variables for update
         old_vars = self._full_state.export_variables()
         # removed for reptile
@@ -167,7 +168,7 @@ class Reptile:
         # TODO: should the data be passed in together for some reason?
         # test_preds = self._test_predictions(train_set, test_set, input_ph, predictions)
         # num_correct = sum([pred == sample[1] for pred, sample in zip(test_preds, test_set)])
-        action = self.sess.run(predictions, feed_dict=test_feed_dict)
+        action = self.session.run(predictions, feed_dict=test_feed_dict)
         # reset back to the old variables for the next evaluation
         self._full_state.import_variables(old_vars)
         #return num_correct

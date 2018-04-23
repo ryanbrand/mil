@@ -423,15 +423,14 @@ class MIL(object):
         else:
             local_outputa, final_eept_preda = self.forward(inputa, state_inputa, weights, is_training=False, network_config=network_config)
 
-        if 'Training' in prefix:
-            if FLAGS.learn_final_eept:
-                final_eept_lossa = euclidean_loss_layer(final_eept_preda, final_eepta, multiplier=self.loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
-            else:
-                final_eept_lossa = tf.constant(0.0)
-            local_lossa = self.act_loss_eps * euclidean_loss_layer(local_outputa, actiona, multiplier=self.loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
-            if FLAGS.learn_final_eept:
-                local_lossa += self.final_eept_loss_eps * final_eept_lossa
-            self.loss = local_lossa
-            self.minimize_op = tf.train.AdamOptimizer(self.step_size).minimize(local_lossa)
+        if FLAGS.learn_final_eept:
+            final_eept_lossa = euclidean_loss_layer(final_eept_preda, final_eepta, multiplier=self.loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
+        else:
+            final_eept_lossa = tf.constant(0.0)
+        local_lossa = self.act_loss_eps * euclidean_loss_layer(local_outputa, actiona, multiplier=self.loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
+        if FLAGS.learn_final_eept:
+            local_lossa += self.final_eept_loss_eps * final_eept_lossa
+        self.loss = local_lossa
+        self.minimize_op = tf.train.AdamOptimizer(self.step_size).minimize(local_lossa)
         # action that is taken in test script
         self.test_act_op = local_outputa

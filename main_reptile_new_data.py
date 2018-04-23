@@ -13,6 +13,7 @@ from tensorflow.python.platform import flags
 from tensorflow.python import debug as tf_debug
 
 # added
+import os
 from reptile_new_data import Reptile
 from datetime import datetime
 
@@ -106,6 +107,7 @@ flags.DEFINE_integer('inner_iters_reptile', 8, 'number of inner loop iterations'
 flags.DEFINE_integer('meta_batch_size_reptile', 5, 'how many inner loops to run')
 flags.DEFINE_float('meta_step_size_reptile', 1.0, 'meta lr')
 flags.DEFINE_integer('num_classes_reptile', 15, 'number of classes to sample') # TODO: consider trying 5
+flags.DEFINE_string('reptile_log_dir', '/home/rmb2208/mil/logs/sim_push/20180423_183906_sim_push._num_shots.15_inner_iters.8_meta_batch_size.5_meta_step_size.1.0_num_classes.15_reptile_new_data/', 'model file to restore') # TODO: change after testing
 
 
 def train(graph, model, saver, sess, log_dir, restore_itr=0, network_config=None):
@@ -274,7 +276,10 @@ def main():
         init_op = tf.global_variables_initializer()
         sess.run(init_op, feed_dict=None)
     if FLAGS.resume:
-        model_file = tf.train.latest_checkpoint(log_dir)
+        if not os.path.exists(FLAGS.reptile_log_dir):
+            model_file = tf.train.latest_checkpoint(log_dir)
+        else:
+            model_file = tf.train.latest_checkpoint(FLAGS.reptile_log_dir)
         if FLAGS.restore_iter > 0:
             model_file = model_file[:model_file.index('model')] + 'model_' + str(FLAGS.restore_iter)
         if model_file:
