@@ -13,6 +13,7 @@ from tensorflow.python import debug as tf_debug
 
 # added
 from reptile import Reptile
+from datetime import datetime
 
 FLAGS = flags.FLAGS
 LOGGER = logging.getLogger(__name__)
@@ -287,7 +288,8 @@ def main():
     if FLAGS.training_set_size != -1:
         exp_string += '.' + str(FLAGS.training_set_size) + '_trials'
 
-    log_dir = FLAGS.log_dir + '/' + exp_string #+ '_reptile'
+    date_time = datetime.today().strftime('%Y%m%d_%H%M%S')
+    log_dir = FLAGS.log_dir + '/' + str(date_time) + '_' + exp_string + '_reptile'
 
     # put here for now
     if FLAGS.train:

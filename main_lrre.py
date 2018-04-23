@@ -9,6 +9,7 @@ from mil_lrre import MIL_LRRE
 from evaluation.eval_reach import evaluate_vision_reach
 from evaluation.eval_push import evaluate_push
 from tensorflow.python.platform import flags
+from datetime import datetime
 
 FLAGS = flags.FLAGS
 LOGGER = logging.getLogger(__name__)
@@ -263,8 +264,8 @@ def main():
         exp_string += '.two_arms'
     if FLAGS.training_set_size != -1:
         exp_string += '.' + str(FLAGS.training_set_size) + '_trials'
-
-    log_dir = FLAGS.log_dir + '/' + exp_string
+    date_time = datetime.today().strftime('%Y%m%d_%H%M%S')
+    log_dir = FLAGS.log_dir + '/' + str(date_time) + '_' + exp_string + '_lrre'
 
     # put here for now
     if FLAGS.train:

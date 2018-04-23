@@ -138,11 +138,11 @@ def evaluate_push(sess, graph, model, data_generator, exp_string, log_dir, demo_
         policy.set_demo(demo_gifs, demoX, demoU)
 
         returns = []
-        gif_dir = log_dir + '/evaluated_gifs/'
+        gif_dir = log_dir + '/evaluated_gifs_task_' + str(task_id) + '/'
         mkdir_p(gif_dir)
 
         while True:
-            video_suffix = gif_dir + str(id) + 'demo_' + str(num_input_demos) + '_' + str(len(returns)) + '.gif'
+            video_suffix = gif_dir + 'demo_' + str(num_input_demos) + '_' + str(len(returns)) + '.gif'
             path = rollout(env, policy, max_path_length=100, env_reset=True,
                            animated=True, speedup=1, always_return_paths=True, save_video=save_video, video_filename=video_suffix, vision=True)
             num_trials += 1
