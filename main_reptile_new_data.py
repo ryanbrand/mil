@@ -14,6 +14,7 @@ from tensorflow.python import debug as tf_debug
 
 # added
 from reptile_new_data import Reptile
+from datetime import datetime
 
 FLAGS = flags.FLAGS
 LOGGER = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ flags.DEFINE_integer('val_set_size', 150, 'size of the training set, 150 for sim
 ## Training options
 flags.DEFINE_integer('metatrain_iterations', 50000, 'number of metatraining iterations.') # 30k for pushing, 50k for reaching and placing
 flags.DEFINE_integer('meta_batch_size', 12, 'number of tasks sampled per meta-update') # 5 for reaching, 15 for pushing, 12 for placing
-flags.DEFINE_float('meta_lr', 0.001, 'the base learning rate of the generator')
+flags.DEFINE_float('meta_lr', 1.000, 'the base learning rate of the generator')
 flags.DEFINE_integer('update_batch_size', 1, 'number of examples used for inner gradient update (K for K-shot learning).')
 flags.DEFINE_float('train_update_lr', 1e-3, 'step size alpha for inner gradient update.') # 0.001 for reaching, 0.01 for pushing and placing
 flags.DEFINE_integer('num_updates', 1, 'number of inner gradient updates during training.') # 5 for placing
@@ -98,6 +99,14 @@ flags.DEFINE_integer('test_update_batch_size', 1, 'number of demos used during t
 flags.DEFINE_float('gpu_memory_fraction', 1.0, 'fraction of memory used in gpu')
 flags.DEFINE_bool('record_gifs', True, 'record gifs during evaluation')
 
+## flags added for reptile
+flags.DEFINE_integer('inner_batch_size_reptile', 10, 'inner batch size')
+flags.DEFINE_integer('num_shots_reptile', 15, 'number of training shots to use for reptile')
+flags.DEFINE_integer('inner_iters_reptile', 8, 'number of inner loop iterations')
+flags.DEFINE_integer('meta_batch_size_reptile', 5, 'how many inner loops to run')
+flags.DEFINE_float('meta_step_size_reptile', 1.0, 'meta lr')
+flags.DEFINE_integer('num_classes_reptile', 15, 'number of classes to sample') # TODO: consider trying 5
+
 
 def train(graph, model, saver, sess, log_dir, restore_itr=0, network_config=None):
     """
@@ -106,7 +115,7 @@ def train(graph, model, saver, sess, log_dir, restore_itr=0, network_config=None
     PRINT_INTERVAL = 100
     TEST_PRINT_INTERVAL = PRINT_INTERVAL*5
     SUMMARY_INTERVAL = 100
-    SAVE_INTERVAL = 1000
+    SAVE_INTERVAL = 10
     TOTAL_ITERS = FLAGS.metatrain_iterations
     save_dir = log_dir + '/model'
     train_writer = tf.summary.FileWriter(log_dir, graph)
@@ -123,8 +132,15 @@ def train(graph, model, saver, sess, log_dir, restore_itr=0, network_config=None
     reptile = Reptile(sess, graph, variables=variables, transductive=True, pre_step_op=None)
     dataset = MILDataGenerator()
 
+    meta_step_size = FLAGS.meta_step_size_reptile
+    meta_step_size_final = 0.0 # decay to step size to 0
+
     # for each training iteration
     for itr in training_range:
+        frac_done = itr / float(TOTAL_ITERS)
+        cur_meta_step_size = frac_done * meta_step_size_final + (1 - frac_done) * meta_step_size
+        print('cur meta step size:', cur_meta_step_size, 'iter:', itr)
+
         reptile.train_step(
             dataset.train_data,
             state_ph=model.state_ph,
@@ -133,13 +149,13 @@ def train(graph, model, saver, sess, log_dir, restore_itr=0, network_config=None
             minimize_op=model.minimize_op,
             loss_op=model.loss,
             writer=train_writer,
-            num_classes=FLAGS.meta_batch_size,
-            num_shots=3,
-            inner_batch_size=3,
-            inner_iters=5,
+            num_classes=FLAGS.num_classes_reptile, # note you probably want to play with this, consider 5
+            num_shots=FLAGS.num_shots_reptile, # train shots
+            inner_batch_size=FLAGS.inner_batch_size_reptile,
+            inner_iters=FLAGS.inner_iters_reptile, # number of inner loop iterations
             step=itr,
-            meta_step_size=FLAGS.meta_lr,
-            meta_batch_size=1
+            meta_step_size=cur_meta_step_size, # this needs to be linearly annealed
+            meta_batch_size=FLAGS.meta_batch_size_reptile   # how many times to run the inner loop, TODO
         )
 
         if itr != 0 and (itr % SAVE_INTERVAL == 0 or itr == training_range[-1]):
@@ -238,7 +254,11 @@ def main():
     if FLAGS.training_set_size != -1:
         exp_string += '.' + str(FLAGS.training_set_size) + '_trials'
 
-    log_dir = FLAGS.log_dir + '/' + exp_string + '_reptile_new_data'
+    reptile_exp_string =  FLAGS.experiment + '.' + '_num_shots.' + str(FLAGS.num_shots_reptile) + '_inner_iters.' + str(FLAGS.inner_iters_reptile) + \
+                          '_meta_batch_size.'   + str(FLAGS.meta_batch_size_reptile) + '_meta_step_size.' + str(FLAGS.meta_step_size_reptile) + \
+                          '_num_classes.'       + str(FLAGS.num_classes_reptile)
+    date_time = datetime.today().strftime('%Y%m%d_%H%M%S')
+    log_dir = FLAGS.log_dir + '/' + str(date_time) + '_' + reptile_exp_string + '_reptile_new_data'
 
     # put here for now
     if FLAGS.train:
@@ -249,7 +269,7 @@ def main():
         model.init_network(graph, prefix='Testing')
     with graph.as_default():
         # Set up saver.
-        saver = tf.train.Saver(max_to_keep=30)
+        saver = tf.train.Saver(max_to_keep=3) # TODO: change later
         # Initialize variables.
         init_op = tf.global_variables_initializer()
         sess.run(init_op, feed_dict=None)
