@@ -104,9 +104,9 @@ flags.DEFINE_integer('inner_batch_size_reptile', 10, 'inner batch size')
 flags.DEFINE_integer('num_shots_reptile', 15, 'number of training shots to use for reptile')
 flags.DEFINE_integer('inner_iters_reptile', 8, 'number of inner loop iterations')
 flags.DEFINE_integer('meta_batch_size_reptile', 5, 'how many inner loops to run')
-flags.DEFINE_float('meta_step_size_reptile', 1.0, 'meta lr')
+flags.DEFINE_float('meta_step_size_reptile', 1e-1, 'meta lr')
 flags.DEFINE_integer('num_classes_reptile', 15, 'number of classes to sample') # TODO: consider trying 5
-
+flags.DEFINE_integer('reptile_iterations', 1000, 'number of metatraining iterations.') # 30k for pushing, 50k for reaching and placing
 
 def train(graph, model, saver, sess, log_dir, restore_itr=0, network_config=None):
     """
@@ -116,7 +116,7 @@ def train(graph, model, saver, sess, log_dir, restore_itr=0, network_config=None
     TEST_PRINT_INTERVAL = PRINT_INTERVAL*5
     SUMMARY_INTERVAL = 100
     SAVE_INTERVAL = 10
-    TOTAL_ITERS = FLAGS.metatrain_iterations
+    TOTAL_ITERS = FLAGS.reptile_iterations
     save_dir = log_dir + '/model'
     train_writer = tf.summary.FileWriter(log_dir, graph)
     # actual training.
@@ -256,7 +256,7 @@ def main():
 
     reptile_exp_string =  FLAGS.experiment + '.' + '_num_shots.' + str(FLAGS.num_shots_reptile) + '_inner_iters.' + str(FLAGS.inner_iters_reptile) + \
                           '_meta_batch_size.'   + str(FLAGS.meta_batch_size_reptile) + '_meta_step_size.' + str(FLAGS.meta_step_size_reptile) + \
-                          '_num_classes.'       + str(FLAGS.num_classes_reptile)
+                          '_num_classes.'       + str(FLAGS.num_classes_reptile) + '_reptile_iterations.' + str(FLAGS.reptile_iterations)
     date_time = datetime.today().strftime('%Y%m%d_%H%M%S')
     log_dir = FLAGS.log_dir + '/' + str(date_time) + '_' + reptile_exp_string + '_reptile_new_data'
 
