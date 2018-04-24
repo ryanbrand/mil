@@ -95,11 +95,14 @@ flags.DEFINE_float('gpu_memory_fraction', 1.0, 'fraction of memory used in gpu')
 flags.DEFINE_bool('record_gifs', True, 'record gifs during evaluation')
 
 ## LRRE 
-flags.DEFINE_bool('use_lrre', True, 'use memory module for meta learning')
+flags.DEFINE_bool('use_lrre_pre', True, 'use memory module for meta learning pre update')
+flags.DEFINE_bool('use_lrre_post', True, 'use memory module for meta learning post update') 
 flags.DEFINE_integer('rep_dim', 7, 'dimension of keys to use in memory')
 tf.flags.DEFINE_bool('use_lsh', False, 'use locality-sensitive hashing '
                      '(NOTE: not fully tested)')
 tf.flags.DEFINE_integer('memory_size', None, 'size of memory module')
+tf.flags.DEFINE_float('lrre_loss_eps', .0001, 'learning rate for memory loss')
+
 
 # TODO: how are graph and model different?
 def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
@@ -121,7 +124,7 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
         training_range = range(restore_itr+1, TOTAL_ITERS)
     # for each training iteration
     for itr in training_range:
-        if itr != 0 and itr % 5 == 0: print 'Training Iter %d / %d' % (itr, TOTAL_ITERS);
+        if itr != 0 and itr % 10 == 0: print 'Training Iter %d / %d' % (itr, TOTAL_ITERS);
         # get state action pairs
         state, tgt_mu = data_generator.generate_data_batch(itr)
         # we split the states and actions in half ? a,b
