@@ -21,9 +21,15 @@ from gym.envs.mujoco.pusher import PusherEnv
 from reptile_new_data import *
 
 class TFAgent(object):
-    def __init__(self, model, scale_bias_file, sess):
+    def __init__(self, model, scale_bias_file, sess, graph):
         self.sess = sess
         self.model = model
+
+        with graph.as_default():
+            variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='model')
+            variables = [v for v in variables if ('b' in v.name or 'w' in v.name)]
+        # TODO: try transductive and non-transductive options
+        self.reptile = Reptile(sess, graph, variables=variables, transductive=False, pre_step_op=None)
 
         if scale_bias_file:
             self.scale, self.bias = load_scale_and_bias(scale_bias_file)
@@ -49,6 +55,7 @@ class TFAgent(object):
 
     # TODO: this is probably wrong, you need to do some sort of reptile update here
     def get_action(self, obs):
+        print('WARNING: case not considered')
         obs = obs.reshape((1,1,23))
         # old feed dict
         # {self.model.statea: self.demoX.dot(self.scale) + self.bias,
@@ -88,9 +95,9 @@ class TFAgent(object):
 
             # TODO: check that training data only comes from one class
             # train
-            statea = self.demoX.dot(self.scale) + self.bias
-            obsa = self.demoVideo
-            actiona = self.demoU
+            statea =  np.squeeze(self.demoX.dot(self.scale) + self.bias, axis=0)
+            obsa =    np.squeeze(self.demoVideo, axis=0)
+            actiona = np.squeeze(self.demoU, axis=0)
             train_data = (statea, obsa, actiona)
             # test
             stateb = obs.dot(self.scale) + self.bias
@@ -100,17 +107,17 @@ class TFAgent(object):
 
             # do an update on the model parameters
             #TODO: somewhere create reptile class instance
-            action = reptile.evaluate(
+            action = self.reptile.evaluate(
                 dataset,
                 self.model.state_ph,
                 self.model.obs_ph,
                 self.model.label_ph,
-                self.model.minimize_op
+                self.model.minimize_op,
                 self.model.test_act_op,
                 num_classes=None,      # not used
                 num_shots=None,        # not used
                 inner_batch_size=None, # not used
-                inner_iters=1 # TODO: see if you want to change this
+                inner_iters=5          # TODO: see if you want to change this
             )
         else:
             print('WARNING: scale is None, case not considered')
@@ -185,7 +192,7 @@ def evaluate_push(sess, graph, model, data_generator, exp_string, log_dir, demo_
 
         # load xml file
         env = load_env(demo_info)
-        policy = TFAgent(model, scale_file, sess)
+        policy = TFAgent(model, scale_file, sess, graph)
         policy.set_demo(demo_gifs, demoX, demoU)
 
         returns = []
