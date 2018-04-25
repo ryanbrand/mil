@@ -161,7 +161,7 @@ class Memory(object):
     print 'hint_pools_idxs: ' + str(hint_pool_idxs.get_shape())
 
     if output_given and use_recent_idx:  # add at least one correct memory
-      most_recent_hint_idx = tf.gather(self.recent_idx, intended_output)
+      most_recent_hint_idx = tf.gather(self.recent_idx, intended_output) # can't do this if output is not integer-valued
       hint_pool_idxs = tf.concat(
           axis=2,
           values=[hint_pool_idxs, most_recent_hint_idx]) #tf.expand_dims(most_recent,1)
@@ -184,7 +184,7 @@ class Memory(object):
     # To make that 20% we'd need to have e^tm*a ~= 0.2K, so tm = log(0.2K)/a.
     softmax_temp = max(1.0, np.log(0.2 * self.choose_k) / self.alpha)
     mask = tf.nn.softmax(hint_pool_sims[:, :choose_k - 1] * softmax_temp)
-
+    # mask = tf.Print(mask, [tf.reduce_max(mask)], 'MASK CITY: ')  
     # prepare hints from the teacher on hint pool
     # teacher hints = difference between true action and memory-predicted actions
     tiled_output = tf.tile(tf.reshape(intended_output, [-1,1,self.key_dim]), [1,choose_k,1]) 
