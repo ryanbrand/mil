@@ -109,7 +109,7 @@ flags.DEFINE_float('meta_step_size_reptile', 1e-1, 'meta lr')
 flags.DEFINE_integer('num_classes_reptile', 15, 'number of classes to sample') # TODO: consider trying 5
 flags.DEFINE_integer('reptile_iterations', 1000, 'number of metatraining iterations.') # 30k for pushing, 50k for reaching and placing
 flags.DEFINE_bool('transductive_reptile', False, 'is transductive, see reptile file for more info')
-flags.DEFINE_string('reptile_log_dir', '/home/rmb2208/mil/logs/sim_push/20180423_183906_sim_push._num_shots.15_inner_iters.8_meta_batch_size.5_meta_step_size.1.0_num_classes.15_reptile_new_data/', 'model file to restore') # TODO: change after testing
+flags.DEFINE_string('reptile_log_dir', '/home/rmb2208/mil/logs/sim_push/20180424_073234_sim_push._num_shots.1_inner_iters.1_meta_batch_size.0_meta_step_size.1.0_num_classes.0_reptile_iterations.60000_reptile', 'model file to restore') # TODO: change after testing
 
 def train(graph, model, saver, sess, log_dir, restore_itr=0, network_config=None):
     """
