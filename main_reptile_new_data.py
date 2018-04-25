@@ -108,7 +108,7 @@ flags.DEFINE_integer('meta_batch_size_reptile', 5, 'how many inner loops to run'
 flags.DEFINE_float('meta_step_size_reptile', 1.0, 'meta lr')
 flags.DEFINE_integer('num_classes_reptile', 15, 'number of classes to sample') # TODO: consider trying 5
 flags.DEFINE_bool('transductive_reptile', False, 'is transductive, see reptile file for more info')
-flags.DEFINE_string('reptile_log_dir', '/home/rmb2208/mil/logs/sim_push/20180423_183906_sim_push._num_shots.15_inner_iters.8_meta_batch_size.5_meta_step_size.1.0_num_classes.15_reptile_new_data/', 'model file to restore') # TODO: change after testing
+flags.DEFINE_string('reptile_log_dir', '/home/rmb2208/mil/logs/sim_push/20180423_204153_sim_push._num_shots.15_inner_iters.8_meta_batch_size.5_meta_step_size.1.0_num_classes.15_reptile_new_data', 'model file to restore') # TODO: change after testing
 
 
 def train(graph, model, saver, sess, log_dir, restore_itr=0, network_config=None):
