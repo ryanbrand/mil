@@ -3,11 +3,12 @@ import random
 import tensorflow as tf
 import logging
 import imageio
+import os
 
 from data_generator import DataGenerator
 from mil_lrre import MIL_LRRE
 from evaluation.eval_reach import evaluate_vision_reach
-from evaluation.eval_push import evaluate_push
+from evaluation.lrre_eval_push import evaluate_push
 from tensorflow.python.platform import flags
 from datetime import datetime
 
@@ -102,7 +103,7 @@ tf.flags.DEFINE_bool('use_lsh', False, 'use locality-sensitive hashing '
                      '(NOTE: not fully tested)')
 tf.flags.DEFINE_integer('memory_size', None, 'size of memory module')
 tf.flags.DEFINE_float('lrre_loss_eps', .0001, 'learning rate for memory loss')
-
+flags.DEFINE_string('lrre_log_dir', '/home/rmb2208/mil/logs/sim_push/20180424_064859_sim_push.xavier_init.4_conv.4_strides.16_filters.3_fc.200_dim.bt_dim_20.mbs_15.ubs_1.numstep_1.updatelr_0.01.clip_10.conv_bt.fp.two_heads.693_trials_lrre', 'model file to restore')
 
 # TODO: how are graph and model different?
 def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
@@ -295,7 +296,12 @@ def main():
         # Start queue runners (used for loading videos on the fly)
         tf.train.start_queue_runners(sess=sess)
     if FLAGS.resume:
-        model_file = tf.train.latest_checkpoint(log_dir)
+        if not os.path.exists(FLAGS.lrre_log_dir):
+            model_file = tf.train.latest_checkpoint(log_dir)
+        else:
+            model_file = tf.train.latest_checkpoint(FLAGS.lrre_log_dir)
+
+        #model_file = tf.train.latest_checkpoint(log_dir)
         if FLAGS.restore_iter > 0:
             model_file = model_file[:model_file.index('model')] + 'model_' + str(FLAGS.restore_iter)
         if model_file:
