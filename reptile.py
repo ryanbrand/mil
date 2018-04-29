@@ -1,5 +1,6 @@
 import random
 import tensorflow as tf
+import numpy as np
 
 from variables import (interpolate_vars, average_vars, subtract_vars, add_vars, scale_vars, VariableState)
 
@@ -26,9 +27,9 @@ class Reptile:
                    state_ph,
                    label_ph,
                    minimize_op,
-                   log_op,
+                   loss_op,
                    writer,
-                   itr,
+                   step,
                    meta_step_size,
                    meta_batch_size):
         """
@@ -51,20 +52,30 @@ class Reptile:
         """
         old_vars = self._model_state.export_variables()
         new_vars = []
-        actiona, statea = dataset 
+        losses   = []
+        print('taking train step')
+        actiona, statea = dataset
         for task_idx in range(meta_batch_size):
             action_batch = actiona[task_idx, :, :]
             state_batch  = statea[task_idx, :, :]
-            # was in loop
+            # inner loop update
             if self._pre_step_op:
                 self.session.run(self._pre_step_op)
             feed_dict = {state_ph : state_batch, label_ph : action_batch}
-            _, summary = self.session.run([minimize_op, log_op], feed_dict=feed_dict)
-            writer.add_summary(summary, itr + itr * task_idx)
-            # out of loop
+            print('taking gradient step')
+            _, loss = self.session.run([minimize_op, loss_op], feed_dict=feed_dict)
+            print('took graident step on loss:', loss)
+            losses.append(loss)
+            # export vars and import old vars
             new_vars.append(self._model_state.export_variables())
             self._model_state.import_variables(old_vars)
+        # meta update
         new_vars = average_vars(new_vars)
         self._model_state.import_variables(interpolate_vars(old_vars, new_vars, meta_step_size))
+        # add loss summary
+        summary = tf.Summary()
+        print('ave loss:', np.mean(losses))
+        summary.value.add(tag='ave_loss', simple_value=np.mean(losses))
+        writer.add_summary(summary, step)
 
 
