@@ -129,9 +129,9 @@ class DataGenerator(object):
                     if FLAGS.experiment == 'sim_push':
                         image_paths = image_paths[6:-6]
                     try:
-                        print('image paths:', len(image_paths), 'demos:',  self.demos[idx]['demoX'].shape[0])
-                        print('TODO: remove the comment below')
-                        #assert len(image_paths) == self.demos[idx]['demoX'].shape[0]
+                        #print('image paths:', len(image_paths), 'demos:',  self.demos[idx]['demoX'].shape[0])
+                        #print('TODO: remove the comment below')
+                        assert len(image_paths) == self.demos[idx]['demoX'].shape[0]
                     except AssertionError:
                         import pdb; pdb.set_trace()
                     if noisy:
@@ -259,7 +259,7 @@ class DataGenerator(object):
             U = np.concatenate((np.array(noisy_U), np.array(U)), axis=1)
             X = [demos[k]['demoX'][v].reshape(test_batch_size*self.T, -1) for k, v in idxes.items()]
             X = np.concatenate((np.array(noisy_X), np.array(X)), axis=1)
-        #assert U.shape[2] == self._dU
-        print('TODO: UNCOMMENT ABOVE', U.shape[2], self._dU)
+        assert U.shape[2] == self._dU
+        #print('TODO: UNCOMMENT ABOVE', U.shape[2], self._dU)
         assert X.shape[2] == len(self.state_idx)
         return X, U

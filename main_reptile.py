@@ -98,6 +98,17 @@ flags.DEFINE_integer('test_update_batch_size', 1, 'number of demos used during t
 flags.DEFINE_float('gpu_memory_fraction', 1.0, 'fraction of memory used in gpu')
 flags.DEFINE_bool('record_gifs', True, 'record gifs during evaluation')
 
+## flags added for reptile
+flags.DEFINE_integer('inner_batch_size_reptile', 10, 'inner batch size')
+flags.DEFINE_integer('num_shots_reptile', 15, 'number of training shots to use for reptile')
+flags.DEFINE_integer('inner_iters_reptile', 8, 'number of inner loop iterations')
+flags.DEFINE_integer('meta_batch_size_reptile', 5, 'how many inner loops to run')
+flags.DEFINE_float('meta_step_size_reptile', 1e-1, 'meta lr')
+flags.DEFINE_integer('num_classes_reptile', 15, 'number of classes to sample') # TODO: consider trying 5
+flags.DEFINE_integer('reptile_iterations', 50000, 'number of metatraining iterations.') # 30k for pushing, 50k for reaching and placing
+flags.DEFINE_bool('transductive_reptile', False, 'is transductive, see reptile file for more info')
+flags.DEFINE_string('reptile_log_dir', '/home/rmb2208/mil/logs/sim_push/20180424_073234_sim_push._num_shots.1_inner_iters.1_meta_batch_size.0_meta_step_size.1.0_num_classes.0_reptile_iterations.60000_reptile', 'model file to restore') # TODO: change after testing
+
 
 def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0, network_config=None):
     """
@@ -107,7 +118,7 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0, net
     TEST_PRINT_INTERVAL = PRINT_INTERVAL*5
     SUMMARY_INTERVAL = 100
     SAVE_INTERVAL = 1000
-    TOTAL_ITERS = FLAGS.metatrain_iterations
+    TOTAL_ITERS = FLAGS.reptile_iterations
     save_dir = log_dir + '/model'
     train_writer = tf.summary.FileWriter(log_dir, graph)
     # actual training.
@@ -123,8 +134,15 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0, net
         print('trainable variables:', variables)
     reptile = Reptile(sess, graph, variables=variables, transductive=True, pre_step_op=None)
 
+    meta_step_size = FLAGS.meta_step_size_reptile
+    meta_step_size_final = 1e-4 # decay to step size to 1e-4
+
     # for each training iteration
     for itr in training_range:
+        frac_done = itr / float(TOTAL_ITERS)
+        cur_meta_step_size = frac_done * meta_step_size_final + (1 - frac_done) * meta_step_size
+        print('cur meta step size:', cur_meta_step_size, 'iter:', itr)
+
         # get (state, action) pairs
         state, tgt_mu = data_generator.generate_data_batch(itr)
         # we split the states and actions in half ? a,b
@@ -135,15 +153,16 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0, net
         actionb = tgt_mu[:, FLAGS.update_batch_size*FLAGS.T:, :]
         #print('statea shape:', statea.shape, 'actiona shape:', actiona.shape)
         dataset = (actiona, statea)
+
         reptile.train_step(
             dataset,
             state_ph=model.state_ph,
             label_ph=model.label_ph,
             minimize_op=model.minimize_op,
-            log_op=model.train_summ_op,
+            loss_op=model.loss,
             writer=train_writer,
-            itr=itr,
-            meta_step_size=FLAGS.meta_lr,
+            step=itr,
+            meta_step_size=cur_meta_step_size,
             meta_batch_size=FLAGS.meta_batch_size
         )
 
@@ -288,8 +307,11 @@ def main():
     if FLAGS.training_set_size != -1:
         exp_string += '.' + str(FLAGS.training_set_size) + '_trials'
 
+    reptile_exp_string =  FLAGS.experiment + '.' + '_num_shots.' + str(FLAGS.num_shots_reptile) + '_inner_iters.' + str(FLAGS.inner_iters_reptile) + \
+                          '_meta_batch_size.'   + str(FLAGS.meta_batch_size_reptile) + '_meta_step_size.' + str(FLAGS.meta_step_size_reptile) + \
+                          '_num_classes.'       + str(FLAGS.num_classes_reptile) + '_reptile_iterations.' + str(FLAGS.reptile_iterations)
     date_time = datetime.today().strftime('%Y%m%d_%H%M%S')
-    log_dir = FLAGS.log_dir + '/' + str(date_time) + '_' + exp_string + '_reptile'
+    log_dir = FLAGS.log_dir + '/' + str(date_time) + '_' + reptile_exp_string + '_reptile_new_data'
 
     # put here for now
     if FLAGS.train:
