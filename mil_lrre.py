@@ -45,6 +45,10 @@ class MIL_LRRE(object):
         self._dO = len(img_idx) + len(state_idx)
         self._dU = dU
 
+        # track memory decisions
+        self.pre_use_mems = []
+        self.post_use_mems = []
+
         # LRRE stuff
         with graph.as_default():
             self.rep_dim = rep_dim
@@ -55,6 +59,7 @@ class MIL_LRRE(object):
             self.memory = self.get_memory()
             self.classifier = self.get_classifier()
             self.global_step = tf.train.get_or_create_global_step()
+
             #tf.contrib.framework.get_or_create_global_step()
 
     def get_memory(self, graph=None):
@@ -67,15 +72,8 @@ class MIL_LRRE(object):
     def get_classifier(self):
         return BasicClassifier(self._dU)
 
-    def core_builder(self, inp, embeddings, action, keep_prob=.3, use_recent_idx=False, network_config=None):
+    def core_builder(self, inp, embeddings, action, keep_prob=.3, pre=True, use_recent_idx=False, network_config=None):
         """TODO"""
-       # Construct layers weight & bias
-        #embeddings, eept_pred = self.forward(image_input, state_input, weights, network_config=network_config)
-        #action = tf.reshape(action, [-1,self._dU])
-        #action = tf.reshape(action, [-1])
-        #embeddings = tf.reshape(embeddings, [-1])
-        #print "embeddings: " + str(tf.shape(embeddings))
-        #embeddings = tf.Print(embeddings, [tf.shape(embeddings)], 'embed: ')
         memory_val, mask, teacher_loss = self.memory.query(embeddings,
             action, use_recent_idx=use_recent_idx)
         #mask = tf.Print(mask, [tf.shape(mask), tf.shape(memory_val), tf.reduce_max(mask)], 'MEMORY: ')
@@ -83,6 +81,9 @@ class MIL_LRRE(object):
         max_confs = tf.reduce_max(mask, axis=1) # confidences for each memory in batch
         use_mem = tf.greater(max_confs, conf_thresh) # if confidence is above threshold
         use_mem = tf.cast(use_mem, tf.int32) # cast to int so can multiply
+        # tracking;
+        if pre: self.pre_use_mems.append(tf.reduce_sum(use_mem) / tf.size(use_mem));
+        else: self.post_use_mems.append(tf.reduce_sum(use_mem) / tf.size(use_mem)); 
         #memory_val *= tf.tile(tf.expand_dims(mask[:,0], 1), [1, self.rep_dim])
         # if confidence < threshold, keep action as embedding 
         loss, action_pred = self.classifier.core_builder(memory_val, inp, action)
@@ -93,6 +94,12 @@ class MIL_LRRE(object):
         # add 'em
         action_pred = tf.add(action_pred, orig_actions)
         return loss + teacher_loss, tf.reshape(action_pred, [-1, self._dU])
+
+    def core_builder_hidden(self, inp, keep_prob=0.3, use_recent_idx=False, network_config=None):
+        memory_val, mask, _ = self.memory.query(embeddings, None, use_recent_idx=use_recent_idx)
+        _, output = self.classifier.core_builder(memory_val, None, None) 
+        return output
+
 
     def get_xy_placeholders(self):
         """TODO"""
@@ -420,6 +427,11 @@ class MIL_LRRE(object):
             final_eept_pred = None
         if FLAGS.fc_bt:
             fc_input = tf.concat(axis=1, values=[fc_input, context])
+        
+        # memory module
+        if FLAGS.use_lrre_hidden:
+            fc_input = core_builder_hidden(fc_input) 
+
         return self.fc_forward(fc_input, weights, state_input=state_input, meta_testing=meta_testing, is_training=is_training, testing=testing, network_config=network_config), final_eept_pred
 
     def fc_forward(self, fc_input, weights, state_input=None, meta_testing=False, is_training=True, testing=False, network_config=None):
@@ -590,7 +602,7 @@ class MIL_LRRE(object):
                 
                 # memory 
                 if FLAGS.use_lrre_pre:
-                    local_lossa += 10.0 * lrre_loss_eps *  mem_loss # should try diff epsilons
+                    local_lossa +=  lrre_loss_eps *  mem_loss # should try diff epsilons
 
                 # end effector position auxiliary loss 
                 if FLAGS.learn_final_eept:
@@ -632,13 +644,13 @@ class MIL_LRRE(object):
                 
                 if FLAGS.use_lrre_post:
                     print "actionb: " + str(actionb.get_shape())
-                    mem_lossb, local_outputb = self.core_builder(inputb, outputb, actionb, keep_prob=0.3)
+                    mem_lossb, outputb = self.core_builder(inputb, outputb, actionb, keep_prob=0.3)
                 
                 # loss on network prediction
                 local_lossb = act_loss_eps * euclidean_loss_layer(outputb, actionb, multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
                 
                 if FLAGS.use_lrre_post:
-                    local_lossb += 10.0 * lrre_loss_eps * mem_lossb
+                    local_lossb +=  lrre_loss_eps * mem_lossb
                 
                 if FLAGS.learn_final_eept: # auxiliary position loss
                     local_lossb += final_eept_loss_eps * final_eept_lossb
@@ -664,13 +676,13 @@ class MIL_LRRE(object):
                     
                     # memory 
                     if FLAGS.use_lrre_pre:
-                        mem_loss, local_outputa = self.core_builder(inputas[j+1], local_outputa, actiona, keep_prob=0.3)
+                        mem_loss, outputa = self.core_builder(inputas[j+1], local_outputa, actiona, keep_prob=0.3)
 
                     loss = act_loss_eps * euclidean_loss_layer(outputa, actionas[j+1], multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
                 
                     # memory
                     if FLAGS.use_lrre_pre:
-                        loss += 10.0 * lrre_loss_eps * mem_loss # should try diff epsilons
+                        loss +=  lrre_loss_eps * mem_loss # should try diff epsilons
                     
                     # end effector position auxiliary loss
                     if FLAGS.learn_final_eept:
@@ -710,13 +722,13 @@ class MIL_LRRE(object):
                         final_eept_lossb = tf.constant(0.0)
 
                     if FLAGS.use_lrre_post: 
-                        mem_lossb, local_outputb = self.core_builder(inputas[j+1], output, actionb, keep_prob=0.3)
+                        mem_lossb, output = self.core_builder(inputas[j+1], output, actionb, keep_prob=0.3)
 
                     lossb = act_loss_eps * euclidean_loss_layer(output, actionb, multiplier=loss_multiplier, use_l1=FLAGS.use_l1_l2_loss)
                     
                     # memory 
                     if FLAGS.use_lrre_post:
-                        lossb += 10.0* lrre_loss_eps * mem_lossb
+                        lossb +=  lrre_loss_eps * mem_lossb
                     
                     
                     if FLAGS.learn_final_eept:

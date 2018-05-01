@@ -99,10 +99,11 @@ flags.DEFINE_bool('record_gifs', True, 'record gifs during evaluation')
 flags.DEFINE_bool('use_lrre_pre', True, 'use memory module for meta learning pre update')
 flags.DEFINE_bool('use_lrre_post', True, 'use memory module for meta learning post update') 
 flags.DEFINE_integer('rep_dim', 7, 'dimension of keys to use in memory')
-tf.flags.DEFINE_bool('use_lsh', False, 'use locality-sensitive hashing '
+flags.DEFINE_bool('use_lsh', False, 'use locality-sensitive hashing '
                      '(NOTE: not fully tested)')
-tf.flags.DEFINE_integer('memory_size', None, 'size of memory module')
-tf.flags.DEFINE_float('lrre_loss_eps', .0001, 'learning rate for memory loss')
+flags.DEFINE_integer('memory_size', None, 'size of memory module')
+flags.DEFINE_float('lrre_loss_eps', .001, 'learning rate for memory loss')
+flags.DEFINE_bool('use_lrre_hidden', False, 'use memory module on fc input')
 flags.DEFINE_string('lrre_log_dir', '/home/rmb2208/mil/logs/sim_push/20180424_064859_sim_push.xavier_init.4_conv.4_strides.16_filters.3_fc.200_dim.bt_dim_20.mbs_15.ubs_1.numstep_1.updatelr_0.01.clip_10.conv_bt.fp.two_heads.693_trials_lrre', 'model file to restore')
 
 # TODO: how are graph and model different?
@@ -167,6 +168,10 @@ def train(graph, model, saver, sess, data_generator, log_dir, restore_itr=0):
                             model.actionb: actionb}
                 with graph.as_default():
                     results = sess.run(input_tensors, feed_dict=feed_dict)
+                    #pres = sess.run([model.pre_use_mems], feed_dict=feed_dict)
+                    #posts = sess.run([model.post_use_mems], feed_dict=feed_dict)
+                #train_writer.add_summary(np.mean(pres[-99:]), itr)
+                #train_writer.add_summary(np.mean(posts[-99:]), itr)
                 train_writer.add_summary(results[0], itr)
                 print 'Test results: average preloss is %.2f, average postloss is %.2f' % (np.mean(results[1]), np.mean(results[2]))
 
@@ -312,6 +317,7 @@ def main():
                 saver.restore(sess, model_file)
     if FLAGS.train:
         train(graph, model, saver, sess, data_generator, log_dir, restore_itr=FLAGS.restore_iter)
+        
     else:
         if 'reach' in FLAGS.experiment:
             generate_test_demos(data_generator)
