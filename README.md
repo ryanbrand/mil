@@ -1,5 +1,8 @@
 # Toward Improved Meta-Imitation Learning
 
+Final Project for COMS 6731, Columbia University Spring 2018
+Ryan Brand, Jason Krone, and Ted Moskovitz
+
 Forked from https://github.com/tianheyu927/mil
 
 Primary Reference: *[One-Shot Visual Imitation Learning via Meta-Learning (Finn*, Yu* et al., 2017)](https://arxiv.org/pdf/1709.04905.pdf).*
