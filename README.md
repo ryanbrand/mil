@@ -1,6 +1,7 @@
 # Toward Improved Meta-Imitation Learning
 
 Final Project for COMS 6731, Columbia University Spring 2018
+
 Ryan Brand, Jason Krone, and Ted Moskovitz
 
 Forked from https://github.com/tianheyu927/mil
